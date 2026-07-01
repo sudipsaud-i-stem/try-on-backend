@@ -26,13 +26,35 @@ This guide shows you how to run the **TrialOn FastAPI Backend** on Kaggle's free
 In your Kaggle notebook, create a new cell, paste the following code, and click the **Run** button:
 
 ```python
-# 1. Clone the repository to the Kaggle working directory
+# Choose ONE of the two methods below to clone your private repository:
+
+# METHOD 1 (Secure - Recommended): Use Kaggle User Secrets
+# 1. In Kaggle Notebook, click Add-ons (top menu) -> Secrets.
+# 2. Add a new secret with Label: "github_pat" and Value: <your_github_personal_access_token>.
+# 3. Enable the checkbox for this notebook to access the secret.
+# 4. Run the code below:
+
 import os
+from kaggle_secrets import UserSecretsClient
+
 if not os.path.exists('/kaggle/working/try-on-backend'):
-    print("Cloning repository...")
-    !git clone https://github.com/sudipsaud-i-stem/try-on-backend.git /kaggle/working/try-on-backend
+    print("Cloning private repository...")
+    user_secrets = UserSecretsClient()
+    pat = user_secrets.get_secret("github_pat")
+    # Replace with your actual github username if different:
+    username = "sudipsaud-i-stem" 
+    !git clone https://{username}:{pat}@github.com/sudipsaud-i-stem/try-on-backend.git /kaggle/working/try-on-backend
 else:
     print("Repository already cloned.")
+
+
+# --- OR ---
+
+
+# METHOD 2 (Quick): Direct token paste (do not share your notebook publicly!)
+# Replace <YOUR_GITHUB_TOKEN> with your token:
+# !git clone https://sudipsaud-i-stem:<YOUR_GITHUB_TOKEN>@github.com/sudipsaud-i-stem/try-on-backend.git /kaggle/working/try-on-backend
+
 
 # 2. Change directory into the backend project
 %cd /kaggle/working/try-on-backend
