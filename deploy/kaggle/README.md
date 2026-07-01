@@ -4,6 +4,50 @@ This guide shows you how to run the **TrialOn FastAPI Backend** on Kaggle's free
 
 ---
 
+## 🧹 Clean start (use this after a failed run)
+
+If you hit dependency errors, old tunnels, or bad try-on results, **start fresh** with one notebook cell:
+
+```python
+# === KAGGLE CLEAN START (paste as a single cell) ===
+import shutil, subprocess, sys
+from pathlib import Path
+
+REPO = Path("/kaggle/working/try-on-backend")
+URL = "https://github.com/sudipsaud-i-stem/try-on-backend.git"
+
+# Stop old backend + tunnel
+subprocess.run("pkill -f 'uvicorn app.main' || true", shell=True)
+subprocess.run("pkill -f cloudflared || true", shell=True)
+
+# Full wipe (re-downloads models ~1.3 GB — safest clean start)
+if REPO.exists():
+    shutil.rmtree(REPO)
+    print("Removed old repo")
+
+subprocess.check_call(["git", "clone", "--depth", "1", URL, str(REPO)])
+%cd /kaggle/working/try-on-backend
+!python deploy/kaggle/kaggle_backend_runner.py
+```
+
+**Faster option** (keeps downloaded models, only clears try-on data + pulls latest code):
+
+```python
+%cd /kaggle/working/try-on-backend
+!python deploy/kaggle/clean_start.py
+```
+
+**Nuclear option** (same as full wipe above, via script):
+
+```python
+%cd /kaggle/working/try-on-backend
+!python deploy/kaggle/clean_start.py --full
+```
+
+> **Tip:** Use a **new Kaggle notebook session** (Session → Restart session) before clean start if GPU memory looks stuck.
+
+---
+
 ## Why run on Kaggle?
 - **Free NVIDIA GPU access** (30 hours/week of T4 x2 or P100).
 - **Runs the heavy CatVTON model** and full **HUBA streetwear pipeline** (background extraction, matting, facial restoration, and upscaling) in seconds instead of minutes.
@@ -89,5 +133,11 @@ else:
 ### 2. "CUDA not available" error
 - Ensure you set the **Accelerator** option to **GPU T4 x2** or **GPU P100** in Kaggle. If you change the accelerator, Kaggle will restart your session on a GPU VM.
 
-### 3. Tunnel disconnects or times out
-- Cloudflare quick tunnels are free and long-running, but Kaggle notebooks will shut down automatically if they are left completely idle for too long. To keep it alive, keep the browser tab containing the Kaggle notebook open.
+### 4. `EncoderDecoderCache` / peft import error
+- Pull latest `main` (includes `peft==0.11.1` pin) and run the **Clean start** cell above.
+- Do **not** manually `pip install --upgrade transformers` on Kaggle — it breaks CatVTON.
+
+### 5. GFPGAN / Real-ESRGAN warnings
+- `functional_tensor` warnings are fixed in latest `main` via `worker/compat.py`. Clean start + re-run.
+
+---
