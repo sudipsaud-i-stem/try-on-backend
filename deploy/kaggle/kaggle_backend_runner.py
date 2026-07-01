@@ -104,15 +104,17 @@ def install_dependencies() -> None:
 
     # Kaggle pre-installs peft >= 0.19 which requires accelerate >= 0.31.0 and huggingface-hub >= 0.25.0.
     # However, huggingface-hub >= 0.26.0 removes 'cached_download', causing import errors in older libraries.
-    # Therefore, we pin huggingface-hub to >=0.25.0,<0.26.0.
-    print("Upgrading accelerate, diffusers, and huggingface-hub to fix peft and cached_download compatibility on Kaggle...")
+    # We also upgrade transformers to >=4.41.0 to resolve 'EncoderDecoderCache' ImportError.
+    print("Upgrading accelerate, diffusers, transformers, and huggingface-hub to fix peft and cached_download compatibility on Kaggle...")
     run_cmd(
         f"{sys.executable} -m pip install "
         f"'accelerate>=0.31.0,<1.0.0' "
         f"'diffusers>=0.27.2,<0.30.0' "
+        f"'transformers>=4.41.0,<4.46.0' "
         f"'huggingface-hub>=0.25.0,<0.26.0'",
         cwd=str(BACKEND_DIR)
     )
+
 
 
 
