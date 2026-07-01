@@ -18,6 +18,8 @@ build/
 data/uploads/
 data/outputs/
 data/db/*.db
+data/db/*.db-shm
+data/db/*.db-wal
 models/*
 !models/.gitkeep
 

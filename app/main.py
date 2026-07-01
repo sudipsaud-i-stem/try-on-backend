@@ -44,7 +44,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Output dir: {}", settings.OUTPUT_DIR)
     logger.info("Model cache: {}", settings.MODEL_CACHE_DIR)
     logger.info("Rate limit: {} try-ons / {} hour(s) per IP", settings.TRYON_RATE_LIMIT, settings.TRYON_RATE_WINDOW_HOURS)
+    logger.info("HUBA pipeline: {}", "enabled" if settings.ENABLE_HUBA_PIPELINE else "legacy")
     logger.info("=" * 60)
+
+    if settings.ENABLE_HUBA_PIPELINE or torch.cuda.is_available():
+        try:
+            from worker.inference import preload_inference_models
+
+            preload_inference_models()
+        except Exception as exc:
+            logger.warning("Model preload deferred (will load on first request): {}", exc)
 
     yield
 

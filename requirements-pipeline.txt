@@ -1,0 +1,15 @@
+# Optional extras for full HUBA pipeline (BiRefNet, GFPGAN, Real-ESRGAN).
+# Core pipeline works with OpenCV fallbacks without these packages.
+#
+# Install after PyTorch:
+#   pip install -r requirements-pipeline.txt
+#
+# Download weights:
+#   GFPGAN:  models/gfpgan/GFPGANv1.4.pth
+#   RealESRGAN: models/realesrgan/RealESRGAN_x2plus.pth
+#   BiRefNet: auto-downloaded from HuggingFace on first use
+
+gfpgan==1.3.8
+basicsr==1.4.2
+realesrgan==0.3.0
+torchvision>=0.16.0

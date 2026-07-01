@@ -81,16 +81,26 @@ def numpy_to_pil(images: np.ndarray) -> list[Image.Image]:
 
 def resize_and_crop(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     """Center-crop and resize an image to the target size."""
-    w, h = image.size
-    target_w, target_h = size
+    box = center_crop_box(image.size, size)
+    return image.crop(box).resize(size, Image.Resampling.LANCZOS)
+
+
+def center_crop_box(
+    image_size: tuple[int, int],
+    target_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    """Return (left, top, right, bottom) for the center crop before resize."""
+    w, h = image_size
+    target_w, target_h = target_size
     if w / h < target_w / target_h:
         new_w = w
         new_h = w * target_h // target_w
     else:
         new_h = h
         new_w = h * target_w // target_h
-    image = image.crop(((w - new_w) // 2, (h - new_h) // 2, (w + new_w) // 2, (h + new_h) // 2))
-    return image.resize(size, Image.Resampling.LANCZOS)
+    left = (w - new_w) // 2
+    top = (h - new_h) // 2
+    return left, top, left + new_w, top + new_h
 
 
 def crop_to_content(image: Image.Image, bg_threshold: int = 235) -> Image.Image:

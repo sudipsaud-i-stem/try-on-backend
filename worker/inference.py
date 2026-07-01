@@ -10,8 +10,10 @@ from PIL import Image
 from app.config import settings
 from worker import postprocess, preprocess
 from worker.catvton.pipeline import CatVTONPipeline
+from worker.pipeline.orchestrator import TryOnOrchestrator
 
 _pipeline: CatVTONPipeline | None = None
+_orchestrator: TryOnOrchestrator | None = None
 
 
 def _is_catvton_ready(model_path: Path) -> bool:
@@ -57,6 +59,20 @@ def _load_pipeline() -> CatVTONPipeline:
     except Exception as exc:
         logger.exception("Failed to load CatVTON pipeline")
         raise RuntimeError(f"Model load failed: {exc}") from exc
+
+
+def _get_orchestrator() -> TryOnOrchestrator:
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = TryOnOrchestrator(infer_fn=_run_pipeline_inference)
+    return _orchestrator
+
+
+def preload_inference_models() -> None:
+    """Warm up CatVTON and optional pipeline models once at startup."""
+    _load_pipeline()
+    if settings.ENABLE_HUBA_PIPELINE:
+        _get_orchestrator().preload_models()
 
 
 def _make_generator() -> torch.Generator | None:
@@ -110,15 +126,38 @@ def run_inference_direct(
 ) -> Path:
     """Run inference directly without database or queue interaction."""
     start_time = time.time()
-    inputs = preprocess.prepare_inputs(person_image_path, garment_image_path, cloth_type=cloth_type)
-    output_image = _run_pipeline_inference(inputs)
-    output_image = postprocess.composite_garment_only(
-        output_image,
-        inputs["person"],
-        inputs["mask"],
-    )
-
+    garment_type = cloth_type or settings.CLOTH_TYPE
     output_path = Path(output_path)
+    debug_dir = None
+    if settings.PIPELINE_DEBUG:
+        debug_dir = output_path.parent / "debug"
+
+    if settings.ENABLE_HUBA_PIPELINE:
+        orchestrator = _get_orchestrator()
+        output_image, ctx = orchestrator.generate_tryon(
+            person_image_path,
+            garment_image_path,
+            garment_type=garment_type,
+            debug_dir=debug_dir,
+        )
+        for line in ctx.stage_logs:
+            logger.info("pipeline | {}", line)
+        if ctx.parse:
+            logger.info(
+                "pipeline summary | confidence={:.2f} fallback={} type={}",
+                ctx.parse.confidence,
+                ctx.parse.used_fallback,
+                ctx.parse.cloth_type,
+            )
+    else:
+        inputs = preprocess.prepare_inputs(person_image_path, garment_image_path, cloth_type=garment_type)
+        output_image = _run_pipeline_inference(inputs)
+        output_image = postprocess.composite_garment_only(
+            output_image,
+            inputs["person"],
+            inputs["mask"],
+        )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_image.mode != "RGB":
         output_image = output_image.convert("RGB")

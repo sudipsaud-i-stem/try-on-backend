@@ -54,6 +54,28 @@ class Settings(BaseSettings):
     ENABLE_CPU_OFFLOAD: bool = False
     ENABLE_ATTENTION_SLICING: bool = False
 
+    # HUBA 7-stage pipeline (noisy real-world photos)
+    ENABLE_HUBA_PIPELINE: bool = True
+    ENABLE_PIPELINE_STAGE0: bool = True
+    ENABLE_PIPELINE_STAGE2: bool = True
+    ENABLE_PIPELINE_STAGE4: bool = True
+    ENABLE_PIPELINE_STAGE5: bool = True
+    ENABLE_PIPELINE_STAGE6: bool = True
+    PIPELINE_DEBUG: bool = False
+    PIPELINE_MIN_SHORT_EDGE: int = 512
+    PIPELINE_BLUR_THRESHOLD: float = 80.0
+    PIPELINE_PARSE_CONFIDENCE: float = 0.45
+    PIPELINE_PRE_UPSCALE: bool = True
+    PIPELINE_AUTO_WHITE_BALANCE: bool = True
+    PIPELINE_MATTING_BLUR: int = 4
+    PIPELINE_NOISE_MATCH_STRENGTH: float = 0.35
+    PIPELINE_DEBLOCK: bool = True
+    PIPELINE_UPSCALE_FACTOR: float = 1.0
+    ENABLE_BIREFNET: bool = False
+    ENABLE_GFPGAN: bool = False
+    ENABLE_REALESRGAN: bool = False
+    BIREFNET_MODEL_ID: str = "ZhengPeng7/BiRefNet"
+
     # Model identifiers
     CATVTON_MODEL_ID: str = "zhengchong/CatVTON"
     CATVTON_BASE_MODEL_ID: str = "runwayml/stable-diffusion-inpainting"
