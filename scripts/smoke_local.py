@@ -97,6 +97,9 @@ def check_gpu() -> bool:
 def check_imports() -> bool:
     print("\n== Pipeline imports ==")
     try:
+        from worker.compat import verify_ml_dependency_stack
+
+        verify_ml_dependency_stack()
         from worker.pipeline.orchestrator import TryOnOrchestrator  # noqa: F401
 
         _ok("TryOnOrchestrator")

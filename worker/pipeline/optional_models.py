@@ -7,6 +7,9 @@ import torch
 from PIL import Image
 
 from app.config import settings
+from worker.compat import ensure_torchvision_functional_tensor
+
+ensure_torchvision_functional_tensor()
 
 if TYPE_CHECKING:
     from transformers import PreTrainedModel

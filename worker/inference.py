@@ -70,6 +70,10 @@ def _get_orchestrator() -> TryOnOrchestrator:
 
 def preload_inference_models() -> None:
     """Warm up CatVTON and optional pipeline models once at startup."""
+    from worker.compat import ensure_torchvision_functional_tensor, verify_ml_dependency_stack
+
+    ensure_torchvision_functional_tensor()
+    verify_ml_dependency_stack()
     _load_pipeline()
     if settings.ENABLE_HUBA_PIPELINE:
         _get_orchestrator().preload_models()

@@ -82,9 +82,8 @@ def check_internet() -> bool:
 def install_dependencies() -> None:
     """Install pip requirements."""
     print("\n=== Step 3: Installing Dependencies ===")
-    # Upgrade pip and install standard packages
     run_cmd(f"{sys.executable} -m pip install --upgrade pip")
-    
+
     req_file = BACKEND_DIR / "requirements.txt"
     if req_file.exists():
         run_cmd(f"{sys.executable} -m pip install -r requirements.txt", cwd=str(BACKEND_DIR))
@@ -98,21 +97,24 @@ def install_dependencies() -> None:
     else:
         print("requirements-pipeline.txt not found. Skipping.")
 
-    # Force numpy < 2 to prevent compilation/ABI issues with gfpgan/basicsr/opencv
+    # Kaggle pre-installs peft >= 0.13 which imports EncoderDecoderCache from transformers.
+    # CatVTON + diffusers 0.27.2 are validated with peft 0.11.1 + transformers 4.40.2.
+    print("Pinning peft/transformers stack for CatVTON (fixes EncoderDecoderCache ImportError)...")
+    run_cmd(
+        f"{sys.executable} -m pip install --force-reinstall "
+        f"'peft==0.11.1' 'transformers==4.40.2' 'diffusers==0.27.2' "
+        f"'accelerate==0.30.0' 'huggingface-hub==0.23.0' 'tokenizers>=0.19,<0.20'",
+        cwd=str(BACKEND_DIR),
+    )
+
+    # basicsr/gfpgan need numpy 1.x on many Linux images.
     print("Forcing numpy < 2.0 to avoid ABI crashes with OpenCV/basicsr/gfpgan...")
     run_cmd(f"{sys.executable} -m pip install 'numpy<2.0.0'", cwd=str(BACKEND_DIR))
 
-    # Kaggle pre-installs peft >= 0.19 which requires accelerate >= 0.31.0 and huggingface-hub >= 0.25.0.
-    # However, huggingface-hub >= 0.26.0 removes 'cached_download', causing import errors in older libraries.
-    # We also upgrade transformers to >=4.41.0 to resolve 'EncoderDecoderCache' ImportError.
-    print("Upgrading accelerate, diffusers, transformers, and huggingface-hub to fix peft and cached_download compatibility on Kaggle...")
+    print("Verifying ML dependency compatibility...")
     run_cmd(
-        f"{sys.executable} -m pip install "
-        f"'accelerate>=0.31.0,<1.0.0' "
-        f"'diffusers>=0.27.2,<0.30.0' "
-        f"'transformers>=4.41.0,<4.46.0' "
-        f"'huggingface-hub>=0.25.0,<0.26.0'",
-        cwd=str(BACKEND_DIR)
+        f"{sys.executable} -c \"from worker.compat import verify_ml_dependency_stack; verify_ml_dependency_stack()\"",
+        cwd=str(BACKEND_DIR),
     )
 
 
