@@ -102,15 +102,15 @@ def install_dependencies() -> None:
     print("Forcing numpy < 2.0 to avoid ABI crashes with OpenCV/basicsr/gfpgan...")
     run_cmd(f"{sys.executable} -m pip install 'numpy<2.0.0'", cwd=str(BACKEND_DIR))
 
-    # Kaggle pre-installs peft >= 0.19 which requires accelerate >= 0.31.0.
-    # Our requirements.txt pins accelerate==0.30.0 which is missing 'clear_device_cache'.
-    # We upgrade accelerate + diffusers to the minimum compatible versions while
-    # keeping the rest of the environment stable.
-    print("Upgrading accelerate and diffusers to fix peft compatibility on Kaggle...")
+    # Kaggle pre-installs peft >= 0.19 which requires accelerate >= 0.31.0 and huggingface-hub >= 0.25.0.
+    # Our requirements.txt pins older versions. We upgrade accelerate, diffusers, and huggingface-hub
+    # to compatible versions while keeping the environment stable.
+    print("Upgrading accelerate, diffusers, and huggingface-hub to fix peft compatibility on Kaggle...")
     run_cmd(
         f"{sys.executable} -m pip install "
         f"'accelerate>=0.31.0,<1.0.0' "
-        f"'diffusers>=0.27.2,<0.30.0'",
+        f"'diffusers>=0.27.2,<0.30.0' "
+        f"'huggingface-hub>=0.25.0,<1.0.0'",
         cwd=str(BACKEND_DIR)
     )
 
