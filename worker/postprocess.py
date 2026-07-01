@@ -1,7 +1,27 @@
 from __future__ import annotations
 
+import cv2
 import numpy as np
 from PIL import Image, ImageFilter
+
+from app.config import settings
+
+
+def tighten_mask(mask: Image.Image, erode_px: int | None = None) -> Image.Image:
+    """
+    Shrink the inpaint mask so CatVTON does not repaint skin, arms, or neck.
+
+    A mask that is too large is the main cause of body-texture drift.
+    """
+    px = settings.MASK_ERODE_PIXELS if erode_px is None else erode_px
+    arr = np.array(mask.convert("L"))
+    if px <= 0:
+        return Image.fromarray(arr, mode="L")
+
+    k = px * 2 + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    arr = cv2.erode(arr, kernel, iterations=1)
+    return Image.fromarray(arr, mode="L")
 
 
 def composite_garment_only(
@@ -10,7 +30,7 @@ def composite_garment_only(
     mask: Image.Image,
 ) -> Image.Image:
     """
-    Keep the original photo everywhere except the inpaint mask.
+    Keep the original photo everywhere except the core garment mask.
 
     Only pixels inside the garment mask are taken from the model output;
     skin, hair, background, and other clothing stay untouched.
@@ -23,12 +43,12 @@ def composite_garment_only(
     )
     mask_arr = mask_arr / 255.0
 
-    # White mask regions = garment swap target from CatVTON AutoMasker.
-    alpha = np.clip((mask_arr - 0.2) / 0.5, 0.0, 1.0)
-    alpha = alpha ** 1.35
+    # Strict core: only confident mask pixels are replaced (preserves skin at edges).
+    alpha = np.clip((mask_arr - 0.45) / 0.35, 0.0, 1.0)
+    alpha = alpha ** 1.6
 
     alpha_img = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
-    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.5))
+    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.0))
     alpha = np.array(alpha_img, dtype=np.float32) / 255.0
 
     alpha_3 = alpha[..., np.newaxis]
@@ -58,7 +78,7 @@ def apply_garment_color_preserve(
     if float(mask_arr.max()) < 0.05:
         return result
 
-    alpha = np.clip((mask_arr - 0.15) / 0.55, 0.0, 1.0) ** 1.2
+    alpha = np.clip((mask_arr - 0.25) / 0.45, 0.0, 1.0) ** 1.3
     alpha_3 = (alpha * strength)[..., np.newaxis]
 
     result_rgb = np.array(result.convert("RGB"), dtype=np.float32)
@@ -67,8 +87,7 @@ def apply_garment_color_preserve(
         dtype=np.float32,
     )
 
-    # Per-channel mean/std color transfer inside the garment mask.
-    garment_mask = alpha > 0.2
+    garment_mask = alpha > 0.35
     if int(garment_mask.sum()) < 32:
         return result
 

@@ -118,10 +118,11 @@ class TryOnOrchestrator:
                 from worker import postprocess
 
                 if ctx.vton_result and ctx.person and ctx.inpaint_mask:
+                    swap_mask = ctx.inference_mask or ctx.inpaint_mask
                     blended_crop = postprocess.composite_garment_only(
                         ctx.vton_result,
                         ctx.person,
-                        ctx.inpaint_mask,
+                        swap_mask,
                     )
                     base = ctx.blend_base or ctx.original_person
                     if ctx.crop_box is not None:

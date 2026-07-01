@@ -37,6 +37,10 @@ def prepare_inputs(
 
     mask_image = generate_clothing_mask(person_image, cloth_type=cloth_type)
 
+    from worker.postprocess import tighten_mask
+
+    mask_image = tighten_mask(mask_image)
+
     return {
         "person": person_image,
         "garment": garment_image,

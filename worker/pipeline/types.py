@@ -47,6 +47,7 @@ class PipelineContext:
 
     blend_base: Image.Image | None = None
     crop_box: tuple[int, int, int, int] | None = None
+    inference_mask: Image.Image | None = None
 
     def log(self, message: str) -> None:
         self.stage_logs.append(message)

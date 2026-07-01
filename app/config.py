@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     OUTPUT_WIDTH: int = 768
     OUTPUT_HEIGHT: int = 1024
     MASK_BLUR_FACTOR: int = 5
+    MASK_ERODE_PIXELS: int = 6
     CLOTH_TYPE: str = "upper"
     INFERENCE_SEED: int = 42
     COLOR_PRESERVE_STRENGTH: float = 0.35
