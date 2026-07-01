@@ -98,6 +98,10 @@ def install_dependencies() -> None:
     else:
         print("requirements-pipeline.txt not found. Skipping.")
 
+    # Force numpy < 2 to prevent compilation/ABI issues with gfpgan/basicsr/opencv
+    print("Forcing numpy version to < 2.0 (e.g. 1.26.4) to avoid compatibility crashes...")
+    run_cmd(f"{sys.executable} -m pip install 'numpy<2.0.0'", cwd=str(BACKEND_DIR))
+
 
 def create_env_file() -> None:
     """Create a Kaggle-optimized .env file."""
