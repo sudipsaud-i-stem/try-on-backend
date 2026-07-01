@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     MASK_BLUR_FACTOR: int = 5
     CLOTH_TYPE: str = "upper"
     INFERENCE_SEED: int = 42
-    COLOR_PRESERVE_STRENGTH: float = 0.0
+    COLOR_PRESERVE_STRENGTH: float = 0.35
     ENABLE_XFORMERS: bool = False
     ENABLE_CPU_OFFLOAD: bool = False
     ENABLE_ATTENTION_SLICING: bool = False
@@ -68,7 +68,8 @@ class Settings(BaseSettings):
     PIPELINE_PRE_UPSCALE: bool = True
     PIPELINE_AUTO_WHITE_BALANCE: bool = True
     PIPELINE_MATTING_BLUR: int = 4
-    PIPELINE_NOISE_MATCH_STRENGTH: float = 0.35
+    PIPELINE_BLEND_MODE: str = "garment_only"  # garment_only | poisson
+    PIPELINE_NOISE_MATCH_STRENGTH: float = 0.0
     PIPELINE_DEBLOCK: bool = True
     PIPELINE_UPSCALE_FACTOR: float = 1.0
     ENABLE_BIREFNET: bool = False

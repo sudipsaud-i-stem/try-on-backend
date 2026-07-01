@@ -87,33 +87,97 @@ def install_dependencies() -> None:
     req_file = BACKEND_DIR / "requirements.txt"
     if req_file.exists():
         run_cmd(f"{sys.executable} -m pip install -r requirements.txt", cwd=str(BACKEND_DIR))
+        print(
+            "\nNOTE: pip may list dependency conflicts with Kaggle pre-installed packages "
+            "(numpy, pydantic, jax, etc.). That is expected — CatVTON needs older pins. "
+            "Ignore those warnings if the install ends with 'Successfully installed'.\n"
+        )
     else:
         print("requirements.txt not found. Skipping.")
 
-    req_pipeline_file = BACKEND_DIR / "requirements-pipeline.txt"
-    if req_pipeline_file.exists():
-        print("Installing pipeline optional packages (GFPGAN, Real-ESRGAN, etc.)...")
-        run_cmd(f"{sys.executable} -m pip install -r requirements-pipeline.txt", cwd=str(BACKEND_DIR))
-    else:
-        print("requirements-pipeline.txt not found. Skipping.")
+    # Install GFPGAN / Real-ESRGAN without replacing Kaggle's pre-built CUDA torch.
+    print("Installing pipeline optional packages (GFPGAN, Real-ESRGAN) — keeping Kaggle torch...")
+    print("basicsr builds from source on Kaggle — this step can take 5–10 minutes. Please wait...\n")
+    run_cmd(
+        f"{sys.executable} -m pip install --no-deps "
+        f"'gfpgan==1.3.8' 'basicsr==1.4.2' 'realesrgan==0.3.0'",
+        cwd=str(BACKEND_DIR),
+    )
+    run_cmd(
+        f"{sys.executable} -m pip install "
+        f"'facexlib>=0.3.0' 'filterpy' 'lmdb' 'yapf' 'addict' 'future' 'tb-nightly'",
+        cwd=str(BACKEND_DIR),
+    )
 
     # Kaggle pre-installs peft >= 0.13 which imports EncoderDecoderCache from transformers.
     # CatVTON + diffusers 0.27.2 are validated with peft 0.11.1 + transformers 4.40.2.
-    print("Pinning peft/transformers stack for CatVTON (fixes EncoderDecoderCache ImportError)...")
+    # IMPORTANT: use --no-deps so accelerate/peft do not replace Kaggle's CUDA torch with
+    # a PyPI cpu torch (breaks torchvision::nms).
+    print("Pinning peft/transformers stack for CatVTON (without upgrading torch)...")
     run_cmd(
-        f"{sys.executable} -m pip install --force-reinstall "
+        f"{sys.executable} -m pip install --no-deps --force-reinstall "
         f"'peft==0.11.1' 'transformers==4.40.2' 'diffusers==0.27.2' "
-        f"'accelerate==0.30.0' 'huggingface-hub==0.23.0' 'tokenizers>=0.19,<0.20'",
+        f"'accelerate==0.30.0' 'huggingface-hub==0.23.0' 'safetensors==0.4.3'",
+        cwd=str(BACKEND_DIR),
+    )
+    run_cmd(
+        f"{sys.executable} -m pip install 'tokenizers>=0.19,<0.20'",
         cwd=str(BACKEND_DIR),
     )
 
     # basicsr/gfpgan need numpy 1.x on many Linux images.
-    print("Forcing numpy < 2.0 to avoid ABI crashes with OpenCV/basicsr/gfpgan...")
+    print("Forcing numpy 1.26 + scipy rebuild (fixes dtype size changed ABI errors)...")
     run_cmd(f"{sys.executable} -m pip install 'numpy<2.0.0'", cwd=str(BACKEND_DIR))
+    run_cmd(
+        f"{sys.executable} -m pip install --force-reinstall 'numpy==1.26.4' 'scipy==1.13.0'",
+        cwd=str(BACKEND_DIR),
+    )
+
+    print("Pinning Pillow (torchvision breaks if Pillow 12.x is mixed with old PIL caches)...")
+    run_cmd(f"{sys.executable} -m pip install --force-reinstall 'Pillow==10.3.0'", cwd=str(BACKEND_DIR))
+
+    fix_torchvision_pair()
 
     print("Verifying ML dependency compatibility...")
     run_cmd(
-        f"{sys.executable} -c \"from worker.compat import verify_ml_dependency_stack; verify_ml_dependency_stack()\"",
+        f"{sys.executable} -c \"from worker.compat import ensure_torchvision_functional_tensor, verify_ml_dependency_stack, verify_torchvision_cuda_ops; "
+        f"ensure_torchvision_functional_tensor(); verify_ml_dependency_stack(); verify_torchvision_cuda_ops()\"",
+        cwd=str(BACKEND_DIR),
+    )
+
+
+def fix_torchvision_pair() -> None:
+    """
+    Reinstall torchvision matched to Kaggle's CUDA torch.
+
+    The peft/accelerate pin step can replace CUDA torch with a PyPI cpu torch (e.g. 2.12.1),
+    while torchvision stays on cu128 — causing 'operator torchvision::nms does not exist'.
+    """
+    print("\n=== Fixing torch + torchvision CUDA pair ===")
+    index = "https://download.pytorch.org/whl/cu128"
+    if not Path("/kaggle").exists():
+        try:
+            import torch
+
+            version = torch.__version__
+            if "+cu124" in version:
+                index = "https://download.pytorch.org/whl/cu124"
+            elif "+cu121" in version:
+                index = "https://download.pytorch.org/whl/cu121"
+            elif "+cu128" not in version:
+                print(f"torch={version}; defaulting to cu128 wheel index.")
+        except ImportError:
+            pass
+
+    print("Removing torch/torchvision/torchaudio (clearing any PyPI cpu torch mismatch)...")
+    subprocess.run(
+        f"{sys.executable} -m pip uninstall -y torch torchvision torchaudio",
+        shell=True,
+        cwd=str(BACKEND_DIR),
+    )
+    print(f"Installing matched CUDA trio from {index} ...")
+    run_cmd(
+        f"{sys.executable} -m pip install torch torchvision torchaudio --index-url {index}",
         cwd=str(BACKEND_DIR),
     )
 
@@ -142,13 +206,14 @@ TRYON_RATE_WINDOW_HOURS=1
 # ML Model Setup
 DEVICE=cuda
 TORCH_DTYPE=float16
-INFERENCE_STEPS=40
-GUIDANCE_SCALE=2.5
+INFERENCE_STEPS=50
+GUIDANCE_SCALE=3.0
 OUTPUT_WIDTH=768
 OUTPUT_HEIGHT=1024
 MASK_BLUR_FACTOR=5
 CLOTH_TYPE=upper
 INFERENCE_SEED=42
+COLOR_PRESERVE_STRENGTH=0.35
 
 # HUBA Advanced Pipeline
 ENABLE_HUBA_PIPELINE=true
@@ -162,7 +227,9 @@ PIPELINE_MIN_SHORT_EDGE=512
 PIPELINE_BLUR_THRESHOLD=80
 PIPELINE_PARSE_CONFIDENCE=0.45
 PIPELINE_PRE_UPSCALE=true
-PIPELINE_AUTO_WHITE_BALANCE=true
+PIPELINE_AUTO_WHITE_BALANCE=false
+PIPELINE_BLEND_MODE=garment_only
+PIPELINE_NOISE_MATCH_STRENGTH=0.0
 PIPELINE_UPSCALE_FACTOR=1.0
 
 # Optional heavy models (enabled since we are on free Kaggle GPU!)

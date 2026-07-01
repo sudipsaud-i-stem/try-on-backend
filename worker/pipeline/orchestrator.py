@@ -114,7 +114,31 @@ class TryOnOrchestrator:
         stage3_vton.run_stage3_vton(ctx, self._infer_fn)
 
         if settings.ENABLE_PIPELINE_STAGE4:
-            stage4_blend.run_stage4_blend(ctx)
+            if settings.PIPELINE_BLEND_MODE == "garment_only":
+                from worker import postprocess
+
+                if ctx.vton_result and ctx.person and ctx.inpaint_mask:
+                    blended_crop = postprocess.composite_garment_only(
+                        ctx.vton_result,
+                        ctx.person,
+                        ctx.inpaint_mask,
+                    )
+                    base = ctx.blend_base or ctx.original_person
+                    if ctx.crop_box is not None:
+                        blended = postprocess.embed_crop_on_base(base, blended_crop, ctx.crop_box)
+                    else:
+                        blended = blended_crop
+                    if blended.size != ctx.original_person.size:
+                        blended = blended.resize(
+                            ctx.original_person.size,
+                            Image.Resampling.LANCZOS,
+                        )
+                    ctx.blended = blended
+                    ctx.log("stage4: garment-only composite (preserves catalog colors)")
+                else:
+                    ctx.blended = ctx.vton_result
+            else:
+                stage4_blend.run_stage4_blend(ctx)
         else:
             from worker import postprocess
 

@@ -133,11 +133,57 @@ else:
 ### 2. "CUDA not available" error
 - Ensure you set the **Accelerator** option to **GPU T4 x2** or **GPU P100** in Kaggle. If you change the accelerator, Kaggle will restart your session on a GPU VM.
 
-### 4. `EncoderDecoderCache` / peft import error
+### 3. Pip shows many red "dependency conflicts" after Step 3
+- **Normal on Kaggle.** The notebook image ships numpy 2.x, transformers 5.x, etc.
+- CatVTON intentionally pins older versions. Ignore conflicts with `jax`, `gradio`, `kaggle-environments`, etc.
+- Only worry if the cell **crashes** with `ERROR` / `Traceback` — not the yellow conflict list.
+
+### 4. Stuck at `basicsr` / `Getting requirements to build wheel`
+- **Wait 5–10 minutes** — basicsr compiles from source on Python 3.12.
+- If it fails, run this in a new cell (then re-run the runner, or continue from Step 4):
+
+```python
+%cd /kaggle/working/try-on-backend
+!pip install --no-deps gfpgan==1.3.8 basicsr==1.4.2 realesrgan==0.3.0
+!pip install facexlib filterpy lmdb yapf addict future tb-nightly
+!pip install --force-reinstall 'peft==0.11.1' 'transformers==4.40.2' 'diffusers==0.27.2' 'accelerate==0.30.0' 'huggingface-hub==0.23.0' 'tokenizers>=0.19,<0.20'
+!pip install 'numpy<2.0.0'
+!python -c "from worker.compat import ensure_torchvision_functional_tensor, verify_ml_dependency_stack; ensure_torchvision_functional_tensor(); verify_ml_dependency_stack()"
+```
+
+### 5. `torchvision::nms does not exist` / `partially initialized module torchvision`
+- **Root cause:** the peft pin step ran `pip install --force-reinstall accelerate peft ...` **without** `--no-deps`, which replaced Kaggle's `torch 2.11+cu128` with a **PyPI cpu torch 2.12.x**. torchvision stayed `0.26+cu128` → mismatch → `nms` missing.
+- **Fix without re-cloning** — stop backend, run this cell, verify, restart:
+
+```python
+import subprocess
+subprocess.run("pkill -f 'uvicorn app.main' || true", shell=True)
+subprocess.run("pkill -f cloudflared || true", shell=True)
+
+# 1) Restore matched CUDA torch trio (never use plain pypi.org for torch on Kaggle)
+!pip uninstall -y torch torchvision torchaudio
+!pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# 2) Re-pin ML stack WITHOUT touching torch
+!pip install --no-deps --force-reinstall peft==0.11.1 transformers==4.40.2 diffusers==0.27.2 accelerate==0.30.0 huggingface-hub==0.23.0 safetensors==0.4.3
+!pip install 'tokenizers>=0.19,<0.20'
+!pip install 'numpy<2.0.0'
+!pip install --force-reinstall 'Pillow==10.3.0'
+
+%cd /kaggle/working/try-on-backend
+!python -c "import torch, torchvision; from PIL import Image; print('torch', torch.__version__, 'torchvision', torchvision.__version__, 'Pillow OK'); torchvision.ops.nms(torch.tensor([[0.,0.,1.,1.]]), torch.tensor([0.9]), 0.5); print('CUDA ops OK')"
+
+# 3) Restart backend + tunnel
+!python deploy/kaggle/kaggle_backend_runner.py
+```
+
+You must see: `torchvision CUDA ops OK: torch=2.11.0+cu128, torchvision=0.26.0+cu128` (or similar matched `+cu128` versions).
+
+### 6. `EncoderDecoderCache` / peft import error
 - Pull latest `main` (includes `peft==0.11.1` pin) and run the **Clean start** cell above.
 - Do **not** manually `pip install --upgrade transformers` on Kaggle — it breaks CatVTON.
 
-### 5. GFPGAN / Real-ESRGAN warnings
+### 7. GFPGAN / Real-ESRGAN warnings
 - `functional_tensor` warnings are fixed in latest `main` via `worker/compat.py`. Clean start + re-run.
 
 ---

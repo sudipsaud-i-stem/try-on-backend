@@ -25,7 +25,8 @@ def _inject_noise(image: np.ndarray, alpha: np.ndarray, noise_std: np.ndarray) -
     if float(noise_std.max()) < 0.5:
         return image
     h, w = alpha.shape
-    noise = np.random.normal(0.0, 1.0, (h, w, 3)).astype(np.float32)
+    rng = np.random.default_rng(settings.INFERENCE_SEED if settings.INFERENCE_SEED >= 0 else None)
+    noise = rng.normal(0.0, 1.0, (h, w, 3)).astype(np.float32)
     noise *= noise_std.reshape(1, 1, 3)
     strength = np.clip(alpha, 0, 1)[..., None] * settings.PIPELINE_NOISE_MATCH_STRENGTH
     out = image.astype(np.float32) + noise * strength

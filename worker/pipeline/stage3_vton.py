@@ -24,6 +24,15 @@ def run_stage3_vton(ctx: PipelineContext, infer_fn) -> Image.Image:
         "mask": ctx.inpaint_mask,
     }
     output = infer_fn(inputs)
+    if settings.COLOR_PRESERVE_STRENGTH > 0:
+        from worker.postprocess import apply_garment_color_preserve
+
+        output = apply_garment_color_preserve(
+            output,
+            garment,
+            ctx.inpaint_mask,
+            settings.COLOR_PRESERVE_STRENGTH,
+        )
     ctx.vton_result = output
     ctx.log(f"stage3: CatVTON ({settings.OUTPUT_WIDTH}x{settings.OUTPUT_HEIGHT}, steps={settings.INFERENCE_STEPS})")
     return output
