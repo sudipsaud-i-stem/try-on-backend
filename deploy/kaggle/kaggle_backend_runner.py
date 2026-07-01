@@ -99,8 +99,20 @@ def install_dependencies() -> None:
         print("requirements-pipeline.txt not found. Skipping.")
 
     # Force numpy < 2 to prevent compilation/ABI issues with gfpgan/basicsr/opencv
-    print("Forcing numpy version to < 2.0 (e.g. 1.26.4) to avoid compatibility crashes...")
+    print("Forcing numpy < 2.0 to avoid ABI crashes with OpenCV/basicsr/gfpgan...")
     run_cmd(f"{sys.executable} -m pip install 'numpy<2.0.0'", cwd=str(BACKEND_DIR))
+
+    # Kaggle pre-installs peft >= 0.19 which requires accelerate >= 0.31.0.
+    # Our requirements.txt pins accelerate==0.30.0 which is missing 'clear_device_cache'.
+    # We upgrade accelerate + diffusers to the minimum compatible versions while
+    # keeping the rest of the environment stable.
+    print("Upgrading accelerate and diffusers to fix peft compatibility on Kaggle...")
+    run_cmd(
+        f"{sys.executable} -m pip install "
+        f"'accelerate>=0.31.0,<1.0.0' "
+        f"'diffusers>=0.27.2,<0.30.0'",
+        cwd=str(BACKEND_DIR)
+    )
 
 
 def create_env_file() -> None:
