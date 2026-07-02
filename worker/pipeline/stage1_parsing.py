@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 from app.config import settings
-from worker.catvton.image_utils import center_crop_box, resize_and_crop
+from worker.catvton.image_utils import center_crop_box, resize_and_crop, resize_and_padding
 from worker.catvton.mask_service import generate_clothing_mask
 from worker.pipeline.types import ParseReport, PipelineContext
 
@@ -88,17 +88,9 @@ def _refine_sleeveless_mask(mask: Image.Image) -> Image.Image:
 
 def _person_segment_fallback(person: Image.Image) -> np.ndarray:
     """GrabCut-based coarse person mask as SCHP sanity check."""
-    rgb = np.array(person.convert("RGB"))
-    h, w = rgb.shape[:2]
-    mask = np.zeros((h, w), np.uint8, dtype=np.uint8)
-    rect = (int(w * 0.12), int(h * 0.05), int(w * 0.76), int(h * 0.9))
-    bgd = np.zeros((1, 65), np.float64)
-    fgd = np.zeros((1, 65), np.float64)
-    try:
-        cv2.grabCut(rgb, mask, rect, bgd, fgd, 3, cv2.GC_INIT_WITH_RECT)
-        return np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
-    except cv2.error:
-        return np.zeros((h, w), dtype=np.uint8)
+    from worker.postprocess import grabcut_person_mask
+
+    return grabcut_person_mask(person)
 
 
 def _blend_masks(primary: np.ndarray, fallback: np.ndarray) -> np.ndarray:
@@ -121,10 +113,23 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
 
     target_size = (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT)
     blend_base = ctx.person
-    crop_box = center_crop_box(blend_base.size, target_size)
-    person = resize_and_crop(blend_base, target_size)
+    src_w, src_h = blend_base.size
+    target_w, target_h = target_size
+
+    # Wide/landscape photos: letterbox so arms/pose are not cut off by center crop.
+    if src_w / src_h > target_w / target_h * 1.05:
+        person = resize_and_padding(blend_base, target_size)
+        ctx.crop_box = None
+        ctx.normalize_mode = "letterbox"
+        ctx.log(f"stage1: letterbox ({src_w}x{src_h} -> {target_w}x{target_h})")
+    else:
+        crop_box = center_crop_box(blend_base.size, target_size)
+        person = resize_and_crop(blend_base, target_size)
+        ctx.crop_box = crop_box
+        ctx.normalize_mode = "center_crop"
+        ctx.log(f"stage1: center crop {crop_box}")
+
     ctx.blend_base = blend_base
-    ctx.crop_box = crop_box
 
     primary_mask = generate_clothing_mask(person, cloth_type=cloth_type)
     primary_arr = np.array(primary_mask.convert("L"))

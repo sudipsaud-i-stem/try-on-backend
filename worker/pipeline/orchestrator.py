@@ -125,17 +125,37 @@ class TryOnOrchestrator:
                         swap_mask,
                     )
                     base = ctx.blend_base or ctx.original_person
-                    if ctx.crop_box is not None:
-                        blended = postprocess.embed_crop_on_base(base, blended_crop, ctx.crop_box)
+
+                    if ctx.normalize_mode == "letterbox":
+                        blended = postprocess.restore_from_letterbox(
+                            blended_crop,
+                            ctx.original_person.size,
+                            (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT),
+                        )
+                        ctx.log("stage4: letterbox restore + garment-only composite")
+                    elif ctx.crop_box is not None:
+                        orig_crop = base.crop(ctx.crop_box)
+                        embed_mask = postprocess.build_embed_mask(
+                            orig_crop,
+                            ctx.inpaint_mask,
+                            ctx.alpha_matte,
+                        )
+                        blended = postprocess.embed_crop_on_base(
+                            base,
+                            blended_crop,
+                            ctx.crop_box,
+                            embed_mask=embed_mask,
+                        )
+                        ctx.log("stage4: masked crop embed + garment-only composite")
                     else:
                         blended = blended_crop
-                    if blended.size != ctx.original_person.size:
-                        blended = blended.resize(
-                            ctx.original_person.size,
-                            Image.Resampling.LANCZOS,
-                        )
+                        if blended.size != ctx.original_person.size:
+                            blended = blended.resize(
+                                ctx.original_person.size,
+                                Image.Resampling.LANCZOS,
+                            )
+                        ctx.log("stage4: garment-only composite (preserves catalog colors)")
                     ctx.blended = blended
-                    ctx.log("stage4: garment-only composite (preserves catalog colors)")
                 else:
                     ctx.blended = ctx.vton_result
             else:
