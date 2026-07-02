@@ -82,8 +82,8 @@ def composite_garment_only(
     )
     mask_arr = mask_arr / 255.0
 
-    alpha = np.clip((mask_arr - 0.58) / 0.28, 0.0, 1.0)
-    alpha = alpha ** 2.0
+    alpha = np.clip((mask_arr - 0.52) / 0.30, 0.0, 1.0)
+    alpha = alpha ** 1.8
 
     alpha_img = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
     alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.0))

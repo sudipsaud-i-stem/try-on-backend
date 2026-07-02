@@ -7,8 +7,18 @@ from PIL import Image
 from worker.catvton.model.cloth_masker import ATR_MAPPING, LIP_MAPPING, part_mask_of
 
 
+def _full_arm_protect(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
+    """Protect entire arms (critical for crossed-arm poses)."""
+    return (
+        part_mask_of("Left-arm", schp_lip, LIP_MAPPING)
+        | part_mask_of("Right-arm", schp_lip, LIP_MAPPING)
+        | part_mask_of("Left-arm", schp_atr, ATR_MAPPING)
+        | part_mask_of("Right-arm", schp_atr, ATR_MAPPING)
+    ).astype(np.uint8)
+
+
 def _arm_distal_protect(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
-    """Protect forearms and hands (lower ~45% of each SCHP arm segment)."""
+    """Protect forearms and hands when full-arm mask is unavailable."""
     protect = np.zeros_like(schp_atr, dtype=np.uint8)
     for arm_label in ("Left-arm", "Right-arm"):
         arm = (
@@ -39,7 +49,7 @@ def build_identity_protect_mask(
         | part_mask_of("Face", atr, ATR_MAPPING)
         | part_mask_of("Hair", atr, ATR_MAPPING)
         | part_mask_of("Hat", atr, ATR_MAPPING)
-        | _arm_distal_protect(atr, lip)
+        | _full_arm_protect(atr, lip)
     )
     return (protect > 0).astype(np.float32)
 
@@ -61,14 +71,19 @@ def refine_inpaint_mask(
 
     if cloth_type in {"upper", "inner", "outer"}:
         h, w = arr.shape
-        # Drop outer side columns below the shoulders to avoid repainting full arms.
+        # Remove entire arm columns from inpaint (crossed-arm safe).
+        arms = _full_arm_protect(np.array(schp_atr), np.array(schp_lip))
+        arr[arms > 0] = 0
+
         shoulder = int(h * 0.24)
         for y in range(shoulder, h):
             t = (y - shoulder) / max(h - shoulder, 1)
-            margin = int(w * (0.06 + 0.14 * t))
+            margin = int(w * (0.04 + 0.10 * t))
             arr[y, :margin] = 0
             arr[y, w - margin :] = 0
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    arr = cv2.morphologyEx(arr, cv2.MORPH_OPEN, kernel)
+    # Close small neck holes without expanding into arms.
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    arr = cv2.morphologyEx(arr, cv2.MORPH_CLOSE, kernel)
+    arr = cv2.morphologyEx(arr, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
     return Image.fromarray(arr, mode="L")

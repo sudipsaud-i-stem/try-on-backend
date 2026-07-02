@@ -165,7 +165,7 @@ def run_inference_direct(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_image.mode != "RGB":
         output_image = output_image.convert("RGB")
-    output_image.save(output_path, format="JPEG", quality=95)
+    output_image.save(output_path, format="JPEG", quality=97)
 
     elapsed = time.time() - start_time
     logger.info("Direct inference completed in {:.2f}s -> {}", elapsed, output_path)

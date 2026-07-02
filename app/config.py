@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     DEVICE: str = "cuda"
     TORCH_DTYPE: str = "float16"
     INFERENCE_STEPS: int = 50
-    GUIDANCE_SCALE: float = 3.0
+    GUIDANCE_SCALE: float = 2.5
     OUTPUT_WIDTH: int = 768
     OUTPUT_HEIGHT: int = 1024
     MASK_BLUR_FACTOR: int = 5
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     MASK_PROTECT_IDENTITY: bool = True
     CLOTH_TYPE: str = "upper"
     INFERENCE_SEED: int = 42
-    COLOR_PRESERVE_STRENGTH: float = 0.35
+    COLOR_PRESERVE_STRENGTH: float = 0.55
     ENABLE_XFORMERS: bool = False
     ENABLE_CPU_OFFLOAD: bool = False
     ENABLE_ATTENTION_SLICING: bool = False

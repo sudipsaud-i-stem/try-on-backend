@@ -104,9 +104,35 @@ def center_crop_box(
 
 
 def crop_to_content(image: Image.Image, bg_threshold: int = 235) -> Image.Image:
-    """Tight-crop flat-lay garments by removing near-white borders."""
+    """Tight-crop flat-lay garments (light or dark backgrounds, PNG alpha)."""
+    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+        rgba = image.convert("RGBA")
+        alpha = np.array(rgba.split()[-1])
+        mask = alpha > 12
+        if not mask.any():
+            return image.convert("RGB")
+        ys, xs = np.where(mask)
+        margin = max(4, int(min(rgba.size[::-1]) * 0.02))
+        box = (
+            max(0, int(xs.min()) - margin),
+            max(0, int(ys.min()) - margin),
+            min(rgba.width, int(xs.max()) + margin + 1),
+            min(rgba.height, int(ys.max()) + margin + 1),
+        )
+        return rgba.crop(box).convert("RGB")
+
     rgb = np.array(image.convert("RGB"))
-    mask = np.min(rgb, axis=2) < bg_threshold
+    corners = np.array(
+        [rgb[0, 0], rgb[0, -1], rgb[-1, 0], rgb[-1, -1]], dtype=np.float32
+    )
+    dark_bg = float(corners.mean()) < 80.0
+
+    if dark_bg:
+        # Black/dark studio backgrounds (e.g. leather jacket PNG on black).
+        mask = np.max(rgb, axis=2) > 28
+    else:
+        mask = np.min(rgb, axis=2) < bg_threshold
+
     if not mask.any():
         return image
 
@@ -122,13 +148,21 @@ def crop_to_content(image: Image.Image, bg_threshold: int = 235) -> Image.Image:
 
 
 def preprocess_garment_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """Crop empty margins then letterbox for stronger garment color signal."""
+    """Crop empty margins then letterbox — keeps catalog colors/textures sharp."""
     w, h = image.size
     cropped = crop_to_content(image)
     cw, ch = cropped.size
-    if cw * ch >= 0.45 * w * h:
+    if cw * ch >= 0.35 * w * h:
         image = cropped
-    return resize_and_padding(image, size)
+    # Scale garment to ~88% of canvas so CatVTON sees more pixel detail.
+    target_w, target_h = size
+    inner = (int(target_w * 0.88), int(target_h * 0.88))
+    fitted = resize_and_padding(image, inner)
+    canvas = Image.new("RGB", size, (255, 255, 255))
+    ox = (target_w - inner[0]) // 2
+    oy = (target_h - inner[1]) // 2
+    canvas.paste(fitted, (ox, oy))
+    return canvas
 
 
 def resize_and_padding(image: Image.Image, size: tuple[int, int]) -> Image.Image:

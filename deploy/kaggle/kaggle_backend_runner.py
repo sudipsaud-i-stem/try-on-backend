@@ -138,6 +138,8 @@ def install_dependencies() -> None:
 
     fix_torchvision_pair()
 
+    install_densepose_optional()
+
     print("Verifying ML dependency compatibility...")
     run_cmd(
         f"{sys.executable} -c \"from worker.compat import ensure_torchvision_functional_tensor, verify_ml_dependency_stack, verify_torchvision_cuda_ops; "
@@ -184,6 +186,18 @@ def fix_torchvision_pair() -> None:
 
 
 
+def install_densepose_optional() -> None:
+    """Install Detectron2/DensePose for pose-aware masks (best-effort)."""
+    script = BACKEND_DIR / "deploy" / "kaggle" / "install_densepose.py"
+    if not script.exists():
+        print("DensePose installer not found — skipping.")
+        return
+    print("\n=== Step 3b: Detectron2 + DensePose (pose-aware masks) ===")
+    result = subprocess.run([sys.executable, str(script)], cwd=str(BACKEND_DIR))
+    if result.returncode != 0:
+        print("DensePose optional install did not complete — SCHP-only masks will be used.")
+
+
 def create_env_file() -> None:
     """Create a Kaggle-optimized .env file."""
     print("\n=== Step 4: Configuring Environment File (.env) ===")
@@ -206,16 +220,16 @@ TRYON_RATE_WINDOW_HOURS=1
 # ML Model Setup
 DEVICE=cuda
 TORCH_DTYPE=float16
-INFERENCE_STEPS=35
-GUIDANCE_SCALE=3.0
+INFERENCE_STEPS=50
+GUIDANCE_SCALE=2.5
 OUTPUT_WIDTH=768
 OUTPUT_HEIGHT=1024
-MASK_BLUR_FACTOR=2
-MASK_ERODE_PIXELS=12
+MASK_BLUR_FACTOR=3
+MASK_ERODE_PIXELS=10
 MASK_PROTECT_IDENTITY=true
 CLOTH_TYPE=upper
 INFERENCE_SEED=42
-COLOR_PRESERVE_STRENGTH=0.30
+COLOR_PRESERVE_STRENGTH=0.55
 
 # HUBA Advanced Pipeline
 ENABLE_HUBA_PIPELINE=true
