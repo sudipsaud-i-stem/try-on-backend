@@ -119,6 +119,7 @@ class TryOnOrchestrator:
 
                 if ctx.vton_result and ctx.person and ctx.inpaint_mask:
                     swap_mask = ctx.inference_mask or ctx.inpaint_mask
+                    target_size = (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT)
                     blended_crop = postprocess.composite_garment_only(
                         ctx.vton_result,
                         ctx.person,
@@ -127,12 +128,22 @@ class TryOnOrchestrator:
                     base = ctx.blend_base or ctx.original_person
 
                     if ctx.normalize_mode == "letterbox":
-                        blended = postprocess.restore_from_letterbox(
+                        restored = postprocess.restore_from_letterbox(
                             blended_crop,
                             ctx.original_person.size,
-                            (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT),
+                            target_size,
                         )
-                        ctx.log("stage4: letterbox restore + garment-only composite")
+                        blended = postprocess.finalize_on_original(
+                            restored,
+                            ctx.original_person,
+                            swap_mask,
+                            ctx.normalize_mode,
+                            ctx.crop_box,
+                            target_size,
+                            ctx.schp_atr,
+                            ctx.schp_lip,
+                        )
+                        ctx.log("stage4: letterbox restore + original composite + identity lock")
                     elif ctx.crop_box is not None:
                         orig_crop = base.crop(ctx.crop_box)
                         embed_mask = postprocess.build_embed_mask(
@@ -140,21 +151,35 @@ class TryOnOrchestrator:
                             ctx.inpaint_mask,
                             ctx.alpha_matte,
                         )
-                        blended = postprocess.embed_crop_on_base(
+                        embedded = postprocess.embed_crop_on_base(
                             base,
                             blended_crop,
                             ctx.crop_box,
                             embed_mask=embed_mask,
                         )
-                        ctx.log("stage4: masked crop embed + garment-only composite")
+                        blended = postprocess.finalize_on_original(
+                            embedded,
+                            ctx.original_person,
+                            swap_mask,
+                            ctx.normalize_mode,
+                            ctx.crop_box,
+                            target_size,
+                            ctx.schp_atr,
+                            ctx.schp_lip,
+                        )
+                        ctx.log("stage4: masked crop embed + original composite + identity lock")
                     else:
-                        blended = blended_crop
-                        if blended.size != ctx.original_person.size:
-                            blended = blended.resize(
-                                ctx.original_person.size,
-                                Image.Resampling.LANCZOS,
-                            )
-                        ctx.log("stage4: garment-only composite (preserves catalog colors)")
+                        blended = postprocess.finalize_on_original(
+                            blended_crop,
+                            ctx.original_person,
+                            swap_mask,
+                            ctx.normalize_mode,
+                            ctx.crop_box,
+                            target_size,
+                            ctx.schp_atr,
+                            ctx.schp_lip,
+                        )
+                        ctx.log("stage4: garment-only composite + identity lock")
                     ctx.blended = blended
                 else:
                     ctx.blended = ctx.vton_result

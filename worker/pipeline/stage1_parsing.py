@@ -6,7 +6,7 @@ from PIL import Image, ImageFilter
 
 from app.config import settings
 from worker.catvton.image_utils import center_crop_box, resize_and_crop, resize_and_padding
-from worker.catvton.mask_service import generate_clothing_mask
+from worker.catvton.mask_service import generate_clothing_mask_full
 from worker.pipeline.types import ParseReport, PipelineContext
 
 # Maps HUBA garment categories to CatVTON mask types.
@@ -131,7 +131,14 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
 
     ctx.blend_base = blend_base
 
-    primary_mask = generate_clothing_mask(person, cloth_type=cloth_type)
+    primary = generate_clothing_mask_full(person, cloth_type=cloth_type)
+    ctx.schp_atr = primary["schp_atr"]
+    ctx.schp_lip = primary["schp_lip"]
+    primary_mask = primary["mask"]
+
+    from worker.mask_refine import refine_inpaint_mask
+
+    primary_mask = refine_inpaint_mask(primary_mask, ctx.schp_atr, ctx.schp_lip, cloth_type)
     primary_arr = np.array(primary_mask.convert("L"))
 
     if ctx.cloth_type.lower() in {"sleeveless", "tank", "tank_top"}:
@@ -152,7 +159,7 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
         confidence = max(confidence, _mask_confidence(blended, ctx.cloth_type) * 0.9)
     else:
         mask = primary_mask
-        ctx.log(f"stage1: SCHP mask ok (confidence={confidence:.2f}, type={cloth_type})")
+        ctx.log(f"stage1: SCHP mask ok (confidence={confidence:.2f}, type={cloth_type}, identity-protected)")
 
     ctx.parse = ParseReport(
         confidence=confidence,

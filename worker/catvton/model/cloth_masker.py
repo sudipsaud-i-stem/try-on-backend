@@ -196,6 +196,21 @@ class AutoMasker:
         dense[(schp_atr == ATR_MAPPING["Right-leg"]) | (schp_lip == LIP_MAPPING["Right-leg"])] = 11
         face = part_mask_of("Face", schp_lip, LIP_MAPPING) | part_mask_of("Face", schp_atr, ATR_MAPPING)
         dense[face > 0] = 23
+
+        # SCHP-only: label distal arms as hands so AutoMasker strong_protect works.
+        for arm_id, hand_id, fore_id in ((17, 4, 21), (16, 3, 20)):
+            ys, xs = np.where(dense == arm_id)
+            if len(ys) < 8:
+                continue
+            y0, y1 = int(ys.min()), int(ys.max())
+            hand_cut = int(y0 + (y1 - y0) * 0.58)
+            fore_cut = int(y0 + (y1 - y0) * 0.38)
+            for y, x in zip(ys, xs):
+                if y >= hand_cut:
+                    dense[y, x] = hand_id
+                elif y >= fore_cut:
+                    dense[y, x] = fore_id
+
         return dense
 
     def process_schp_lip(self, image_or_path):

@@ -48,7 +48,22 @@ def generate_clothing_mask(
     cloth_type: str | None = None,
 ) -> Image.Image:
     """Generate an agnostic mask using the official CatVTON AutoMasker pipeline."""
+    result = generate_clothing_mask_full(person_image, cloth_type=cloth_type)
+    return result["mask"]
+
+
+def generate_clothing_mask_full(
+    person_image: Image.Image,
+    cloth_type: str | None = None,
+) -> dict:
+    """Return mask plus SCHP parse maps for identity protection."""
     mask_type = cloth_type or settings.CLOTH_TYPE
     automasker = _load_automasker()
-    mask = automasker(person_image, mask_type=mask_type)["mask"]
-    return _mask_processor.blur(mask, blur_factor=settings.MASK_BLUR_FACTOR)
+    raw = automasker(person_image, mask_type=mask_type)
+    mask = _mask_processor.blur(raw["mask"], blur_factor=settings.MASK_BLUR_FACTOR)
+    return {
+        "mask": mask,
+        "schp_atr": raw["schp_atr"],
+        "schp_lip": raw["schp_lip"],
+        "densepose": raw["densepose"],
+    }

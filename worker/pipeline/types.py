@@ -49,6 +49,8 @@ class PipelineContext:
     crop_box: tuple[int, int, int, int] | None = None
     inference_mask: Image.Image | None = None
     normalize_mode: str = "center_crop"  # center_crop | letterbox
+    schp_atr: Image.Image | None = None
+    schp_lip: Image.Image | None = None
 
     def log(self, message: str) -> None:
         self.stage_logs.append(message)
