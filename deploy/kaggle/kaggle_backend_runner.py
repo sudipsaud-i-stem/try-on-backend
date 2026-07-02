@@ -187,15 +187,13 @@ def fix_torchvision_pair() -> None:
 
 
 def install_densepose_optional() -> None:
-    """Install Detectron2/DensePose for pose-aware masks (best-effort)."""
+    """Pin NumPy and optionally install MediaPipe. Skips Detectron2 on Kaggle."""
     script = BACKEND_DIR / "deploy" / "kaggle" / "install_densepose.py"
     if not script.exists():
-        print("DensePose installer not found — skipping.")
+        print("Pose helper script not found — skipping.")
         return
-    print("\n=== Step 3b: Detectron2 + DensePose (pose-aware masks) ===")
-    result = subprocess.run([sys.executable, str(script)], cwd=str(BACKEND_DIR))
-    if result.returncode != 0:
-        print("DensePose optional install did not complete — SCHP-only masks will be used.")
+    print("\n=== Step 3b: Pose helpers (NumPy pin + MediaPipe) ===")
+    subprocess.run([sys.executable, str(script)], cwd=str(BACKEND_DIR), check=False)
 
 
 def create_env_file() -> None:

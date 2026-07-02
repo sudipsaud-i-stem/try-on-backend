@@ -7,10 +7,11 @@ from PIL import Image
 
 def mediapipe_available() -> bool:
     try:
-        import mediapipe  # noqa: F401
+        import mediapipe as mp  # noqa: F401
 
+        _ = mp.solutions.hands
         return True
-    except ImportError:
+    except Exception:
         return False
 
 
