@@ -38,7 +38,7 @@ def _load_automasker() -> AutoMasker:
         logger.info("AutoMasker using official DensePose + SCHP")
     else:
         logger.warning(
-            "Detectron2/DensePose not installed — using SCHP-only mask (install MSVC + detectron2 for full quality)"
+            "Detectron2/DensePose not installed — using SCHP + MediaPipe mask (install detectron2 for full quality)"
         )
     return _automasker
 

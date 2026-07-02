@@ -140,6 +140,8 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
 
     primary_mask = refine_inpaint_mask(primary_mask, ctx.schp_atr, ctx.schp_lip, cloth_type)
     primary_arr = np.array(primary_mask.convert("L"))
+    coverage = _mask_coverage(primary_arr)
+    ctx.log(f"stage1: garment mask coverage={coverage:.2%} after refine")
 
     if ctx.cloth_type.lower() in {"sleeveless", "tank", "tank_top"}:
         primary_mask = _refine_sleeveless_mask(primary_mask)

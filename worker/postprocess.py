@@ -82,8 +82,8 @@ def composite_garment_only(
     )
     mask_arr = mask_arr / 255.0
 
-    alpha = np.clip((mask_arr - 0.52) / 0.30, 0.0, 1.0)
-    alpha = alpha ** 1.8
+    alpha = np.clip((mask_arr - 0.38) / 0.38, 0.0, 1.0)
+    alpha = alpha ** 1.4
 
     alpha_img = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
     alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.0))
@@ -266,6 +266,14 @@ def preserve_identity_regions(
             schp_protect = cv2.resize(schp_protect, (w, h), interpolation=cv2.INTER_LINEAR)
         protect = np.maximum(protect, schp_protect)
 
+    from worker.pose_mediapipe import build_mediapipe_protect_mask
+
+    mp_protect = build_mediapipe_protect_mask(original)
+    if mp_protect is not None:
+        if mp_protect.shape[:2] != (h, w):
+            mp_protect = cv2.resize(mp_protect, (w, h), interpolation=cv2.INTER_LINEAR)
+        protect = np.maximum(protect, mp_protect)
+
     rgb = np.array(original.convert("RGB"))
     face = _detect_face_bbox(rgb)
     if face is not None:
@@ -311,7 +319,7 @@ def finalize_on_original(
     else:
         full_mask = swap_mask.resize(original.size, Image.Resampling.LANCZOS)
 
-    tight_mask = tighten_mask(full_mask, erode_px=settings.MASK_ERODE_PIXELS + 4)
+    tight_mask = tighten_mask(full_mask, erode_px=max(4, settings.MASK_ERODE_PIXELS - 2))
     if generated.size != original.size:
         generated = generated.resize(original.size, Image.Resampling.LANCZOS)
 
