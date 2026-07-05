@@ -142,6 +142,8 @@ def install_dependencies() -> None:
 
     install_densepose_optional()
 
+    finalize_numpy_before_server()
+
     print("Verifying ML dependency compatibility...")
     run_cmd(
         f"{sys.executable} -c \"from worker.compat import ensure_torchvision_functional_tensor, verify_ml_dependency_stack, verify_torchvision_cuda_ops; "
@@ -189,13 +191,19 @@ def fix_torchvision_pair() -> None:
 
 
 def install_densepose_optional() -> None:
-    """Pin NumPy and optionally install MediaPipe. Skips Detectron2 on Kaggle."""
+    """Kaggle-safe NumPy pin only (no MediaPipe — it upgrades NumPy to 2.x)."""
     script = BACKEND_DIR / "deploy" / "kaggle" / "install_densepose.py"
     if not script.exists():
         print("Pose helper script not found — skipping.")
         return
-    print("\n=== Step 3b: Pose helpers (NumPy pin + MediaPipe) ===")
-    subprocess.run([sys.executable, str(script)], cwd=str(BACKEND_DIR), check=False)
+    print("\n=== Step 3b: Kaggle NumPy pin (skip MediaPipe) ===")
+    subprocess.run([sys.executable, str(script)], cwd=str(BACKEND_DIR), check=True)
+
+
+def finalize_numpy_before_server() -> None:
+    """Last-chance NumPy/OpenCV pin — must run before uvicorn subprocess."""
+    pin_script = BACKEND_DIR / "deploy" / "kaggle" / "pin_numpy.py"
+    subprocess.run([sys.executable, str(pin_script)], cwd=str(BACKEND_DIR), check=True)
 
 
 def create_env_file() -> None:
@@ -342,6 +350,7 @@ def _stream_output(proc: subprocess.Popen, prefix: str) -> None:
 
 def run_services(cf_path: Path) -> None:
     """Start uvicorn backend and Cloudflare tunnel, then stream logs."""
+    finalize_numpy_before_server()
     print("\n=== Step 8: Starting Services & Creating Tunnel ===")
 
     (BACKEND_DIR / "data" / "uploads").mkdir(parents=True, exist_ok=True)
@@ -455,6 +464,7 @@ def main() -> None:
         if not check_gpu():
             print("Aborting because GPU/CUDA is required.")
             return
+        finalize_numpy_before_server()
         cf_path = download_cloudflared()
         run_services(cf_path)
         return

@@ -47,6 +47,10 @@ def main() -> None:
     os.chdir(BACKEND_DIR)
     sys.path.insert(0, str(BACKEND_DIR))
 
+    pin_script = BACKEND_DIR / "deploy" / "kaggle" / "pin_numpy.py"
+    print("Fixing NumPy/OpenCV before server start...")
+    subprocess.run([sys.executable, str(pin_script)], cwd=str(BACKEND_DIR), check=True)
+
     env_path = BACKEND_DIR / ".env"
     if not env_path.exists():
         print("ERROR: .env missing — run kaggle_backend_runner.py once first.")

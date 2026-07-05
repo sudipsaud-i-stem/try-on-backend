@@ -2,9 +2,8 @@
 """
 Pose helpers for Kaggle / Linux.
 
-Detectron2+DensePose does NOT build on Kaggle (Python 3.12 + torch 2.11).
-This script only pins NumPy 1.26 (required by CatVTON/OpenCV) and optionally
-tries MediaPipe after that pin.
+On Kaggle: only pins NumPy 1.26 (MediaPipe breaks NumPy on Py3.12).
+Detectron2+DensePose is skipped — use SCHP + OpenCV for face/hand protection.
 """
 
 from __future__ import annotations
@@ -13,24 +12,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-
-
-def pin_numpy_stack() -> None:
-    """CatVTON + OpenCV require NumPy 1.x — Kaggle defaults to NumPy 2.x."""
-    print("Pinning numpy 1.26.4 + scipy 1.13.0 (required for CatVTON/OpenCV)...")
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--force-reinstall",
-            "numpy==1.26.4",
-            "scipy==1.13.0",
-            "opencv-python==4.9.0.80",
-        ],
-        check=False,
-    )
 
 
 def _can_import_densepose() -> bool:
@@ -43,53 +24,22 @@ def _can_import_densepose() -> bool:
         return False
 
 
-def _can_import_mediapipe() -> bool:
-    try:
-        import mediapipe as mp  # noqa: F401
-
-        _ = mp.solutions.hands
-        return True
-    except Exception:
-        return False
-
-
-def install_mediapipe() -> bool:
-    """Install MediaPipe only after NumPy 1.x pin."""
-    if _can_import_mediapipe():
-        print("MediaPipe already works.")
-        return True
-
-    print("Installing MediaPipe (face + hand fallback)...")
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-q", "mediapipe==0.10.14"],
-        check=False,
-    )
-
-    if _can_import_mediapipe():
-        print("MediaPipe ready — face/hand protection enabled.")
-        return True
-
-    print("MediaPipe unavailable — SCHP + OpenCV face detection will be used.")
-    return False
-
-
 def install_detectron2_densepose(verbose: bool = True) -> bool:
-    """
-    Best-effort pose libs. On Kaggle: pin NumPy + MediaPipe only (no Detectron2).
-    """
-    pin_numpy_stack()
-
+    """Best-effort pose libs. On Kaggle: NumPy pin only (no Detectron2 / MediaPipe)."""
     on_kaggle = Path("/kaggle").exists()
     if on_kaggle:
         print("\n=== Kaggle detected ===")
-        print("Skipping Detectron2/DensePose (no Py3.12 wheel; source build breaks NumPy).")
-        print("Using SCHP + MediaPipe/OpenCV for face and hand protection.\n")
-        install_mediapipe()
-        return _can_import_densepose()
+        print("Skipping Detectron2/DensePose and MediaPipe (break NumPy 2.x on Py3.12).")
+        print("Using SCHP + OpenCV for segmentation and face protection.\n")
+        pin_script = Path(__file__).resolve().parent / "pin_numpy.py"
+        subprocess.run([sys.executable, str(pin_script)], check=True)
+        return False
+
+    pin_script = Path(__file__).resolve().parent / "pin_numpy.py"
+    subprocess.run([sys.executable, str(pin_script)], check=False)
 
     if _can_import_densepose():
         print("Detectron2 + DensePose already installed.")
-        install_mediapipe()
         return True
 
     print("\n=== Detectron2 + DensePose (optional, non-Kaggle) ===")
@@ -124,14 +74,8 @@ def install_detectron2_densepose(verbose: bool = True) -> bool:
     print(f"$ {' '.join(cmd)}")
     subprocess.run(cmd, env=env, check=False)
 
-    dense_ok = _can_import_densepose()
-    if dense_ok:
-        print("Detectron2 + DensePose installed.")
-    else:
-        print("Detectron2 not available — SCHP + MediaPipe/OpenCV fallback active.")
-
-    install_mediapipe()
-    return dense_ok
+    subprocess.run([sys.executable, str(pin_script)], check=False)
+    return _can_import_densepose()
 
 
 if __name__ == "__main__":
