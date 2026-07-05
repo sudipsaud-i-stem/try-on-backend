@@ -9,6 +9,7 @@ from app.config import settings
 from worker.exceptions import MaskValidationError
 from worker.garment_classifier import GarmentProfile, classify_garment
 from worker.mask_refine import (
+    clamp_mask_above_collar,
     clip_mask_to_person,
     compute_mask_confidence,
     fill_mask_holes,
@@ -84,6 +85,7 @@ def build_garment_mask(
     mask_arr = np.array(primary.convert("L"))
     mask_arr = clip_mask_to_person(mask_arr, person, schp_atr, schp_lip)
     mask_arr = keep_torso_component(mask_arr, schp_atr, schp_lip)
+    mask_arr = clamp_mask_above_collar(mask_arr, body.keypoints, schp_atr, schp_lip)
 
     used_fallback = "schp"
     valid, diagnostics = mask_shape_is_valid(
@@ -101,6 +103,7 @@ def build_garment_mask(
         mask_arr = synthesize_garment_mask(
             schp_atr, schp_lip, body, garment_profile, person_image=person
         )
+        mask_arr = clamp_mask_above_collar(mask_arr, body.keypoints, schp_atr, schp_lip)
         used_fallback = "synthesis"
         valid, diagnostics = mask_shape_is_valid(
             mask_arr,
@@ -130,6 +133,7 @@ def build_garment_mask(
         mask_arr = np.maximum(rebuilt, seg)
         mask_arr = keep_torso_component(mask_arr, schp_atr, schp_lip)
         mask_arr = fill_mask_holes(mask_arr)
+        mask_arr = clamp_mask_above_collar(mask_arr, body.keypoints, schp_atr, schp_lip)
         used_fallback = seg_source
         valid, diagnostics = mask_shape_is_valid(
             mask_arr,
@@ -142,6 +146,25 @@ def build_garment_mask(
         )
 
     confidence = compute_mask_confidence(diagnostics, min_coverage=settings.MASK_MIN_COVERAGE)
+
+    # Last resort: good coverage but neckline drift — clamp to collar and re-check.
+    if (not valid or confidence < settings.PIPELINE_PARSE_CONFIDENCE) and diagnostics.get(
+        "mask_coverage_person_bbox", 0
+    ) >= 0.35:
+        mask_arr = clamp_mask_above_collar(mask_arr, body.keypoints, schp_atr, schp_lip)
+        valid, diagnostics = mask_shape_is_valid(
+            mask_arr,
+            schp_atr,
+            schp_lip,
+            person_bbox=body.person_bbox,
+            keypoints=body.keypoints,
+            sleeve_length=garment_profile.sleeve_length,
+            min_coverage=settings.MASK_MIN_COVERAGE,
+        )
+        confidence = compute_mask_confidence(diagnostics, min_coverage=settings.MASK_MIN_COVERAGE)
+        if valid:
+            log("mask: collar clamp recovered valid mask")
+
     diagnostics["garment_neckline_class"] = garment_profile.neckline
     diagnostics["garment_sleeve_class"] = garment_profile.sleeve_length
     diagnostics["used_fallback"] = used_fallback

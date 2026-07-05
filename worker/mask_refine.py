@@ -455,6 +455,51 @@ def ensure_minimum_garment_coverage(
     return merged
 
 
+def clamp_mask_above_collar(
+    mask: np.ndarray,
+    keypoints: BodyKeypoints | None,
+    schp_atr: np.ndarray,
+    schp_lip: np.ndarray,
+) -> np.ndarray:
+    """Strip mask pixels above the collarbone — fixes GrabCut/segmentation including the head."""
+    h, w = mask.shape[:2]
+    collar_y: int | None = None
+
+    if keypoints and keypoints.left_shoulder and keypoints.right_shoulder:
+        collar_y = int(
+            (keypoints.left_shoulder[1] + keypoints.right_shoulder[1]) * 0.5 * h + 0.025 * h
+        )
+    else:
+        face = _face_hair_protect(schp_atr, schp_lip)
+        if face.any():
+            collar_y = int(np.where(face > 0)[0].max()) + int(0.045 * h)
+
+    if collar_y is None:
+        return mask
+
+    result = np.array(mask, dtype=np.uint8)
+    result[: max(0, collar_y), :] = 0
+    face = _face_hair_protect(schp_atr, schp_lip)
+    result[face > 0] = 0
+    return result
+
+
+def _collar_reference_y(
+    h: int,
+    keypoints: BodyKeypoints | None,
+    schp_atr: np.ndarray,
+    schp_lip: np.ndarray,
+) -> int | None:
+    if keypoints and keypoints.left_shoulder and keypoints.right_shoulder:
+        return int(
+            (keypoints.left_shoulder[1] + keypoints.right_shoulder[1]) * 0.5 * h + 0.025 * h
+        )
+    face = _face_hair_protect(schp_atr, schp_lip)
+    if face.any():
+        return int(np.where(face > 0)[0].max()) + int(0.04 * h)
+    return None
+
+
 def mask_coverage_in_bbox(mask: np.ndarray, bbox: tuple[int, int, int, int]) -> float:
     x0, y0, x1, y1 = bbox
     crop = mask[y0:y1, x0:x1]
@@ -488,15 +533,23 @@ def mask_shape_is_valid(
     face = _face_hair_protect(schp_atr, schp_lip)
     neckline_ok = True
     neckline_offset = None
-    if face.any() and binary.any():
-        fy = np.where(face > 0)[0]
-        chin_y = int(fy.max())
+    if binary.any():
         top_y = int(np.where(binary > 0)[0].min())
-        neckline_offset = top_y - chin_y
-        # Collarbone should sit at or just below the chin — not above it (negative offset).
-        neckline_ok = (
-            chin_y - int(0.02 * binary.shape[0]) <= top_y <= chin_y + int(0.12 * binary.shape[0])
-        )
+        h = binary.shape[0]
+        collar_y = _collar_reference_y(h, keypoints, schp_atr, schp_lip)
+
+        if collar_y is not None:
+            neckline_offset = top_y - collar_y
+            margin_above = int(0.06 * h) if (keypoints and getattr(keypoints, "side_pose", False)) else int(0.04 * h)
+            margin_below = int(0.18 * h) if (keypoints and getattr(keypoints, "side_pose", False)) else int(0.14 * h)
+            neckline_ok = (collar_y - margin_above) <= top_y <= (collar_y + margin_below)
+        elif face.any():
+            fy = np.where(face > 0)[0]
+            chin_y = int(fy.max())
+            neckline_offset = top_y - chin_y
+            neckline_ok = chin_y - int(0.02 * h) <= top_y <= chin_y + int(0.14 * h)
+        else:
+            neckline_ok = top_y >= int(0.10 * h)
 
     symmetry_ok = True
     symmetry_ratio = 1.0
