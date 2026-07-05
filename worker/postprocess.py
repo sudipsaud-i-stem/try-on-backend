@@ -101,11 +101,12 @@ def composite_garment_only(
     )
     mask_arr = mask_arr / 255.0
 
-    alpha = np.clip((mask_arr - 0.22) / 0.35, 0.0, 1.0)
-    alpha = alpha ** 1.15
+    # Hard swap inside mask core — soft edge only at boundary (avoids ghost shirt overlay).
+    alpha = np.clip((mask_arr - 0.10) / 0.22, 0.0, 1.0)
+    alpha = alpha ** 0.95
 
     alpha_img = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
-    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=0.8))
+    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.2))
     alpha = np.array(alpha_img, dtype=np.float32) / 255.0
 
     alpha_3 = alpha[..., np.newaxis]
@@ -338,7 +339,11 @@ def finalize_on_original(
     else:
         full_mask = swap_mask.resize(original.size, Image.Resampling.LANCZOS)
 
-    tight_mask = tighten_mask(full_mask, erode_px=max(4, settings.MASK_ERODE_PIXELS - 2))
+    # Light edge feather only — stage3 already used a tightened inference mask.
+    feather = Image.fromarray(
+        cv2.GaussianBlur(np.array(full_mask.convert("L")), (5, 5), 0),
+        mode="L",
+    )
     if generated.size != original.size:
         generated = generated.resize(original.size, Image.Resampling.LANCZOS)
 
@@ -351,8 +356,30 @@ def finalize_on_original(
             schp_lip, ctx_normalize_mode, crop_box, original.size, target_size
         )
 
-    out = composite_garment_only(generated, original, tight_mask)
+    out = composite_garment_only(generated, original, feather)
     return preserve_identity_regions(out, original, schp_atr_full, schp_lip_full)
+
+
+def map_vton_to_original(
+    vton: Image.Image,
+    normalize_mode: str,
+    crop_box: tuple[int, int, int, int] | None,
+    original_size: tuple[int, int],
+    target_size: tuple[int, int],
+) -> Image.Image:
+    """Place CatVTON output (768x1024 workspace) back onto full-resolution coordinates."""
+    if normalize_mode == "letterbox":
+        return restore_from_letterbox(vton, original_size, target_size)
+
+    if crop_box is not None:
+        left, top, right, bottom = crop_box
+        cw, ch = right - left, bottom - top
+        canvas = Image.new("RGB", original_size, (0, 0, 0))
+        patch = vton.resize((cw, ch), Image.Resampling.LANCZOS)
+        canvas.paste(patch, (left, top))
+        return canvas
+
+    return vton.resize(original_size, Image.Resampling.LANCZOS)
 
 
 def restore_from_letterbox(

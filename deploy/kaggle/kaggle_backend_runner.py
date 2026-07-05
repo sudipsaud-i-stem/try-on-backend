@@ -233,7 +233,7 @@ GUIDANCE_SCALE=2.5
 OUTPUT_WIDTH=768
 OUTPUT_HEIGHT=1024
 MASK_BLUR_FACTOR=3
-MASK_ERODE_PIXELS=8
+MASK_ERODE_PIXELS=6
 MASK_PROTECT_IDENTITY=true
 CLOTH_TYPE=upper
 INFERENCE_SEED=42
@@ -253,7 +253,7 @@ PIPELINE_PARSE_CONFIDENCE=0.45
 PIPELINE_PRE_UPSCALE=true
 PIPELINE_AUTO_WHITE_BALANCE=false
 PIPELINE_BLEND_MODE=garment_only
-PIPELINE_WHITE_BG_INFERENCE=true
+PIPELINE_WHITE_BG_INFERENCE=false
 PIPELINE_PERSON_MATTING_FEATHER=5
 PIPELINE_NOISE_MATCH_STRENGTH=0.0
 PIPELINE_DEBLOCK=true
@@ -465,6 +465,7 @@ def main() -> None:
             print("Aborting because GPU/CUDA is required.")
             return
         finalize_numpy_before_server()
+        create_env_file()
         cf_path = download_cloudflared()
         run_services(cf_path)
         return

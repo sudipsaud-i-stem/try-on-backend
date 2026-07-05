@@ -73,7 +73,7 @@ def ensure_minimum_garment_coverage(
     mask: np.ndarray,
     schp_atr: np.ndarray,
     schp_lip: np.ndarray,
-    min_coverage: float = 0.06,
+    min_coverage: float = 0.14,
 ) -> np.ndarray:
     """Guarantee enough torso area for CatVTON when SCHP/refine shrinks the mask too far."""
     if float((mask > 127).mean()) >= min_coverage:

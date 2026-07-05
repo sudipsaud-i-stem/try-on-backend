@@ -126,67 +126,26 @@ class TryOnOrchestrator:
                     swap_mask = ctx.inference_mask or ctx.inpaint_mask
                     target_size = (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT)
                     composite_base = self._composite_base(ctx)
-                    inference_base = (
-                        ctx.person_white
-                        if settings.PIPELINE_WHITE_BG_INFERENCE and ctx.person_white
-                        else ctx.person
-                    )
-                    blended_crop = postprocess.composite_garment_only(
-                        ctx.vton_result,
-                        inference_base,
-                        swap_mask,
-                    )
-                    base = composite_base
 
-                    if ctx.normalize_mode == "letterbox":
-                        restored = postprocess.restore_from_letterbox(
-                            blended_crop,
-                            composite_base.size,
-                            target_size,
-                        )
-                        blended = postprocess.finalize_on_original(
-                            restored,
-                            composite_base,
-                            swap_mask,
-                            ctx.normalize_mode,
-                            ctx.crop_box,
-                            target_size,
-                            ctx.schp_atr,
-                            ctx.schp_lip,
-                        )
-                        ctx.log("stage4: letterbox restore + garment swap + identity lock")
-                    elif ctx.crop_box is not None:
-                        orig_crop = base.crop(ctx.crop_box)
-                        embed_mask = postprocess.build_embed_mask(orig_crop, ctx.inpaint_mask)
-                        embedded = postprocess.embed_crop_on_base(
-                            base,
-                            blended_crop,
-                            ctx.crop_box,
-                            embed_mask=embed_mask,
-                        )
-                        blended = postprocess.finalize_on_original(
-                            embedded,
-                            composite_base,
-                            swap_mask,
-                            ctx.normalize_mode,
-                            ctx.crop_box,
-                            target_size,
-                            ctx.schp_atr,
-                            ctx.schp_lip,
-                        )
-                        ctx.log("stage4: garment embed + identity lock")
-                    else:
-                        blended = postprocess.finalize_on_original(
-                            blended_crop.resize(composite_base.size, Image.Resampling.LANCZOS),
-                            composite_base,
-                            swap_mask,
-                            ctx.normalize_mode,
-                            ctx.crop_box,
-                            target_size,
-                            ctx.schp_atr,
-                            ctx.schp_lip,
-                        )
-                        ctx.log("stage4: garment-only composite + identity lock")
+                    vton_mapped = postprocess.map_vton_to_original(
+                        ctx.vton_result,
+                        ctx.normalize_mode,
+                        ctx.crop_box,
+                        composite_base.size,
+                        target_size,
+                    )
+                    blended = postprocess.finalize_on_original(
+                        vton_mapped,
+                        composite_base,
+                        swap_mask,
+                        ctx.normalize_mode,
+                        ctx.crop_box,
+                        target_size,
+                        ctx.schp_atr,
+                        ctx.schp_lip,
+                    )
+                    mode = ctx.normalize_mode or "direct"
+                    ctx.log(f"stage4: {mode} → original garment swap + identity lock")
                     ctx.blended = blended
                 else:
                     ctx.blended = ctx.vton_result

@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     PIPELINE_NOISE_MATCH_STRENGTH: float = 0.0
     PIPELINE_DEBLOCK: bool = True
     PIPELINE_UPSCALE_FACTOR: float = 1.0
-    PIPELINE_WHITE_BG_INFERENCE: bool = True
+    PIPELINE_WHITE_BG_INFERENCE: bool = False
     PIPELINE_PERSON_MATTING_FEATHER: int = 5
     ENABLE_BIREFNET: bool = False
     ENABLE_GFPGAN: bool = False

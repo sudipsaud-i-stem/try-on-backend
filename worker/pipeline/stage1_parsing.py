@@ -162,6 +162,19 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
 
     ctx.log(f"stage1: garment mask coverage={coverage:.2%} after refine")
 
+    if coverage < 0.14:
+        from worker.mask_refine import ensure_minimum_garment_coverage
+
+        expanded = ensure_minimum_garment_coverage(
+            primary_arr,
+            np.array(ctx.schp_atr),
+            np.array(ctx.schp_lip),
+            min_coverage=0.14,
+        )
+        primary_mask = Image.fromarray(expanded, mode="L")
+        coverage = _mask_coverage(expanded)
+        ctx.log(f"stage1: expanded undersized mask to {coverage:.2%} coverage")
+
     if ctx.cloth_type.lower() in {"sleeveless", "tank", "tank_top"}:
         primary_mask = _refine_sleeveless_mask(primary_mask)
         primary_arr = np.array(primary_mask.convert("L"))
