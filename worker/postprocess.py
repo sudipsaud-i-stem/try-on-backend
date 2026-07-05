@@ -28,7 +28,7 @@ def grabcut_person_mask(image: Image.Image) -> np.ndarray:
     """Coarse person silhouette for embedding / fallback matting."""
     rgb = np.array(image.convert("RGB"))
     h, w = rgb.shape[:2]
-    mask = np.zeros((h, w), np.uint8, dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.uint8)
     rect = (int(w * 0.08), int(h * 0.03), int(w * 0.84), int(h * 0.94))
     bgd = np.zeros((1, 65), np.float64)
     fgd = np.zeros((1, 65), np.float64)
