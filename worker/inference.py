@@ -127,14 +127,14 @@ def run_inference_direct(
     garment_image_path: str,
     output_path: str | Path,
     cloth_type: str | None = None,
+    debug: bool | None = None,
 ) -> Path:
     """Run inference directly without database or queue interaction."""
     start_time = time.time()
     garment_type = cloth_type or settings.CLOTH_TYPE
     output_path = Path(output_path)
-    debug_dir = None
-    if settings.PIPELINE_DEBUG:
-        debug_dir = output_path.parent / "debug"
+    save_debug = settings.PIPELINE_DEBUG if debug is None else debug
+    debug_dir = output_path.parent / "debug" if save_debug else None
 
     if settings.ENABLE_HUBA_PIPELINE:
         orchestrator = _get_orchestrator()

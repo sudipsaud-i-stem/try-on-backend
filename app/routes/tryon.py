@@ -5,7 +5,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from PIL import Image
@@ -21,10 +21,14 @@ from app.services.rate_limit import (
     record_tryon_request,
     update_tryon_status,
 )
+from worker.debug_viz import DEBUG_STEP_LABELS
 
 router = APIRouter(tags=["tryon"])
 
 MIN_PERSON_SHORT_EDGE = 400
+
+_DEBUG_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+_DEBUG_TEXT_FILES = {"pipeline_summary.json", "pipeline_logs.txt"}
 
 
 def _job_dir(job_id: str) -> Path:
@@ -63,6 +67,62 @@ def _validate_person_image(path: Path) -> None:
         )
 
 
+def _debug_dir(job_id: str) -> Path:
+    return _job_dir(job_id) / "debug"
+
+
+def _list_debug_steps(job_id: str) -> list[dict[str, str]]:
+    debug_path = _debug_dir(job_id)
+    if not debug_path.is_dir():
+        return []
+
+    steps: list[dict[str, str]] = []
+    for path in sorted(debug_path.iterdir()):
+        if path.name == "pipeline_summary.json":
+            steps.append(
+                {
+                    "id": "pipeline_summary",
+                    "label": DEBUG_STEP_LABELS["pipeline_summary"],
+                    "url": f"/tryon/debug/{job_id}/pipeline_summary.json",
+                    "kind": "json",
+                }
+            )
+            continue
+        if path.name == "pipeline_logs.txt":
+            steps.append(
+                {
+                    "id": "pipeline_logs",
+                    "label": DEBUG_STEP_LABELS["pipeline_logs"],
+                    "url": f"/tryon/debug/{job_id}/pipeline_logs.txt",
+                    "kind": "text",
+                }
+            )
+            continue
+        if path.suffix.lower() not in _DEBUG_IMAGE_SUFFIXES:
+            continue
+        step_id = path.stem
+        steps.append(
+            {
+                "id": step_id,
+                "label": DEBUG_STEP_LABELS.get(step_id, step_id.replace("_", " ")),
+                "url": f"/tryon/debug/{job_id}/{path.name}",
+                "kind": "image",
+            }
+        )
+    return steps
+
+
+def _resolve_debug_file(job_id: str, filename: str) -> Path:
+    if ".." in filename or filename.startswith("/") or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if filename not in _DEBUG_TEXT_FILES and Path(filename).suffix.lower() not in _DEBUG_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Unsupported debug file type")
+    path = _debug_dir(job_id) / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Debug file not found")
+    return path
+
+
 async def _run_tryon_job(
     job_id: str,
     request_id: str,
@@ -70,6 +130,7 @@ async def _run_tryon_job(
     garment_path: Path,
     result_path: Path,
     cloth_type: str,
+    debug: bool = False,
 ) -> None:
     from worker.inference import run_inference_direct
 
@@ -81,6 +142,7 @@ async def _run_tryon_job(
             str(garment_path),
             result_path,
             cloth_type,
+            debug,
         )
         if not result_path.exists():
             raise RuntimeError("Result image was not created")
@@ -90,14 +152,15 @@ async def _run_tryon_job(
         with SessionLocal() as db:
             update_tryon_status(db, request_id, "success")
 
-        _write_status(
-            job_id,
-            {
-                "job_id": job_id,
-                "status": "completed",
-                "result_url": f"/tryon/result/{job_id}",
-            },
-        )
+        completed: dict = {
+            "job_id": job_id,
+            "status": "completed",
+            "result_url": f"/tryon/result/{job_id}",
+        }
+        if debug and _debug_dir(job_id).is_dir():
+            completed["debug_url"] = f"/tryon/debug/{job_id}"
+            completed["debug_steps"] = _list_debug_steps(job_id)
+        _write_status(job_id, completed)
         logger.info("Async try-on completed job_id={}", job_id)
     except Exception as exc:
         from app.db.database import SessionLocal
@@ -117,6 +180,7 @@ async def virtual_tryon_async(
     person_image: UploadFile = File(...),
     garment_image: UploadFile = File(...),
     cloth_type: str = "upper",
+    debug: bool = Query(False, description="Save and expose per-stage pipeline images for analysis"),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     ip_address = get_client_ip(request)
@@ -142,19 +206,21 @@ async def virtual_tryon_async(
     _write_status(job_id, {"job_id": job_id, "status": "queued"})
 
     asyncio.create_task(
-        _run_tryon_job(job_id, request_id, person_path, garment_path, result_path, cloth_type)
+        _run_tryon_job(job_id, request_id, person_path, garment_path, result_path, cloth_type, debug)
     )
 
-    logger.info("POST /tryon/async job_id={} person={}", job_id, person_image.filename)
-    return JSONResponse(
-        {
-            "job_id": job_id,
-            "status": "processing",
-            "status_url": f"/tryon/status/{job_id}",
-            "result_url": f"/tryon/result/{job_id}",
-            "message": "Poll status_url every 5s until status=completed (typical 90-130s on Kaggle).",
-        }
-    )
+    logger.info("POST /tryon/async job_id={} person={} debug={}", job_id, person_image.filename, debug)
+    payload: dict = {
+        "job_id": job_id,
+        "status": "processing",
+        "status_url": f"/tryon/status/{job_id}",
+        "result_url": f"/tryon/result/{job_id}",
+        "message": "Poll status_url every 5s until status=completed (typical 90-130s on Kaggle).",
+    }
+    if debug:
+        payload["debug_url"] = f"/tryon/debug/{job_id}"
+        payload["message"] += " Debug step images available at debug_url when complete."
+    return JSONResponse(payload)
 
 
 @router.get("/tryon/status/{job_id}", summary="Poll async try-on status")
@@ -184,6 +250,40 @@ async def tryon_result(job_id: str) -> FileResponse:
     )
 
 
+@router.get("/tryon/debug/{job_id}", summary="List pipeline debug step outputs for a job")
+async def tryon_debug_manifest(job_id: str) -> JSONResponse:
+    if not _debug_dir(job_id).is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail="No debug output for this job. Re-run with ?debug=true on POST /tryon/async",
+        )
+    summary_path = _debug_dir(job_id) / "pipeline_summary.json"
+    summary = None
+    if summary_path.is_file():
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    return JSONResponse(
+        {
+            "job_id": job_id,
+            "summary": summary,
+            "steps": _list_debug_steps(job_id),
+        }
+    )
+
+
+@router.get(
+    "/tryon/debug/{job_id}/{filename}",
+    summary="Download one pipeline debug artifact",
+)
+async def tryon_debug_file(job_id: str, filename: str) -> FileResponse:
+    path = _resolve_debug_file(job_id, filename)
+    media = "application/json" if filename.endswith(".json") else "text/plain"
+    if path.suffix.lower() in {".jpg", ".jpeg"}:
+        media = "image/jpeg"
+    elif path.suffix.lower() == ".png":
+        media = "image/png"
+    return FileResponse(path=str(path), media_type=media, filename=filename)
+
+
 @router.post(
     "/tryon",
     responses={
@@ -197,6 +297,7 @@ async def virtual_tryon(
     person_image: UploadFile = File(...),
     garment_image: UploadFile = File(...),
     cloth_type: str = "upper",
+    debug: bool = Query(False, description="Save per-stage pipeline images under outputs/{job_id}/debug/"),
     db: Session = Depends(get_db),
 ) -> FileResponse:
     ip_address = get_client_ip(request)
@@ -236,6 +337,7 @@ async def virtual_tryon(
             str(garment_path),
             result_path,
             cloth_type,
+            debug,
         )
 
         if not result_path.exists():

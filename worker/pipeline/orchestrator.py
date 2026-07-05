@@ -225,6 +225,8 @@ class TryOnOrchestrator:
         return final, ctx
 
     def _save_debug(self, ctx: PipelineContext, debug_dir: Path) -> None:
+        from worker.debug_viz import colorize_schp_atr, mask_overlay_rgb
+
         debug_dir.mkdir(parents=True, exist_ok=True)
 
         def _save(name: str, image: Image.Image | None) -> None:
@@ -234,16 +236,24 @@ class TryOnOrchestrator:
 
         _save("00_original", ctx.original_person)
         _save("01_person_normalized", ctx.person)
-        _save("01b_person_white", ctx.person_white)
-        _save("01c_person_segment", ctx.person_segment)
         _save("02_inpaint_mask", ctx.inpaint_mask)
-        _save("03_alpha_matte", ctx.alpha_matte)
+        _save("02b_inference_mask", ctx.inference_mask)
+        if ctx.person and ctx.inpaint_mask:
+            _save("02c_mask_overlay", mask_overlay_rgb(ctx.person, ctx.inpaint_mask))
+        if ctx.schp_atr is not None:
+            _save("02d_schp_parsing", colorize_schp_atr(ctx.schp_atr))
+        _save("03_garment", ctx.garment)
         _save("04_vton", ctx.vton_result)
         _save("05_blended", ctx.blended)
         _save("06_final", ctx.final)
 
+        summary = ctx.summary()
         (debug_dir / "pipeline_summary.json").write_text(
-            json.dumps(ctx.summary(), indent=2),
+            json.dumps(summary, indent=2),
             encoding="utf-8",
         )
-        ctx.log(f"debug: saved intermediates to {debug_dir}")
+        (debug_dir / "pipeline_logs.txt").write_text(
+            "\n".join(ctx.stage_logs),
+            encoding="utf-8",
+        )
+        ctx.log(f"debug: saved {len(list(debug_dir.glob('*.jpg')))} step images to {debug_dir}")
