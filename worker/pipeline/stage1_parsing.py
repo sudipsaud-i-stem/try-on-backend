@@ -191,6 +191,9 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
         cloth_type=cloth_type,
         mask_coverage=_mask_coverage(np.array(mask.convert("L"))),
     )
+    from worker.mask_refine import fill_mask_holes
+
+    mask_arr = fill_mask_holes(np.array(mask.convert("L")))
     ctx.person = person
-    ctx.inpaint_mask = mask
-    return mask
+    ctx.inpaint_mask = Image.fromarray(mask_arr, mode="L")
+    return ctx.inpaint_mask

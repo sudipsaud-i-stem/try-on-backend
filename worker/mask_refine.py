@@ -20,20 +20,44 @@ def _face_hair_protect(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray
 
 
 def _arm_distal_protect(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
-    """Protect forearms and hands (lower ~45% of each SCHP arm segment)."""
-    protect = np.zeros_like(schp_atr, dtype=np.uint8)
-    for arm_label in ("Left-arm", "Right-arm"):
+    """Protect forearms/hands using outer lateral bands (works when arms are crossed)."""
+    h, w = schp_atr.shape[:2]
+    protect = np.zeros((h, w), dtype=np.uint8)
+    for arm_label, outer_side in (("Left-arm", "left"), ("Right-arm", "right")):
         arm = (
             part_mask_of(arm_label, schp_lip, LIP_MAPPING)
             | part_mask_of(arm_label, schp_atr, ATR_MAPPING)
         )
         if not arm.any():
             continue
-        ys, _ = np.where(arm > 0)
+        ys, xs = np.where(arm > 0)
         y0, y1 = int(ys.min()), int(ys.max())
-        y_cut = int(y0 + (y1 - y0) * 0.50)
-        protect[(arm > 0) & (np.arange(arm.shape[0])[:, None] >= y_cut)] = 255
+        x0, x1 = int(xs.min()), int(xs.max())
+        y_cut = int(y0 + (y1 - y0) * 0.55)
+        if outer_side == "left":
+            x_cut = int(x0 + (x1 - x0) * 0.45)
+            lateral = (arm > 0) & (np.arange(w)[None, :] <= x_cut)
+        else:
+            x_cut = int(x0 + (x1 - x0) * 0.55)
+            lateral = (arm > 0) & (np.arange(w)[None, :] >= x_cut)
+        distal = (arm > 0) & (np.arange(h)[:, None] >= y_cut)
+        protect[(lateral | distal) & (arm > 0)] = 255
     return protect
+
+
+def fill_mask_holes(mask: np.ndarray) -> np.ndarray:
+    """Fill enclosed holes (crossed-arm chest gaps) so CatVTON gets a continuous shirt region."""
+    binary = (mask > 127).astype(np.uint8)
+    if binary.max() == 0:
+        return mask
+    filled = binary.copy()
+    flood = filled.copy()
+    h, w = flood.shape
+    flood_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
+    cv2.floodFill(flood, flood_mask, (0, 0), 1)
+    holes = (flood == 0) & (binary == 0)
+    filled[holes] = 1
+    return (filled * 255).astype(np.uint8)
 
 
 def _full_arm_protect(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
@@ -56,17 +80,26 @@ def _schp_upper_garment(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarra
 def build_identity_protect_mask(
     schp_atr: Image.Image,
     schp_lip: Image.Image,
+    garment_mask: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Paste back face, hair, and forearms/hands — not full arms (keeps new shirt sleeves)."""
+    """Paste back face, hair, and visible forearms — skip regions where garment was swapped."""
     atr = np.array(schp_atr)
     lip = np.array(schp_lip)
     protect = _face_hair_protect(atr, lip) | _arm_distal_protect(atr, lip)
-    return (protect > 0).astype(np.float32)
+    protect = (protect > 0).astype(np.float32)
+    if garment_mask is not None:
+        g = np.array(garment_mask.convert("L") if isinstance(garment_mask, Image.Image) else garment_mask)
+        if g.shape[:2] == protect.shape[:2]:
+            g = (g > 127).astype(np.uint8)
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+            g = cv2.dilate(g, k, iterations=1)
+            protect = protect * (1.0 - g.astype(np.float32))
+    return np.clip(protect, 0.0, 1.0)
 
 
 def _inpaint_exclude_mask(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
-    """Exclude face, hair, and forearms/hands from inpaint — shirt sleeves may be repainted."""
-    return _face_hair_protect(schp_atr, schp_lip) | _arm_distal_protect(schp_atr, schp_lip)
+    """Exclude face/hair only — crossed arms over the chest stay in the shirt mask."""
+    return _face_hair_protect(schp_atr, schp_lip)
 
 
 def ensure_minimum_garment_coverage(
@@ -125,4 +158,5 @@ def refine_inpaint_mask(
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     arr = cv2.morphologyEx(arr, cv2.MORPH_CLOSE, kernel)
+    arr = fill_mask_holes(arr)
     return Image.fromarray(arr, mode="L")

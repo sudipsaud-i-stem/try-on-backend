@@ -335,8 +335,6 @@ class AutoMasker:
             | part_mask_of("Face", schp_atr, ATR_MAPPING)
             | part_mask_of(["Hair"], schp_lip, LIP_MAPPING)
             | part_mask_of(["Hair"], schp_atr, ATR_MAPPING)
-            | part_mask_of(["Left-arm", "Right-arm"], schp_lip, LIP_MAPPING)
-            | part_mask_of(["Left-arm", "Right-arm"], schp_atr, ATR_MAPPING)
             | part_mask_of(PROTECT_BODY_PARTS[part], schp_lip, LIP_MAPPING)
             | part_mask_of(PROTECT_BODY_PARTS[part], schp_atr, ATR_MAPPING)
             | part_mask_of(PROTECT_CLOTH_PARTS[part]["LIP"], schp_lip, LIP_MAPPING)
@@ -348,10 +346,6 @@ class AutoMasker:
 
         if int((mask > 0).sum()) < 500:
             return Image.fromarray(mask * 255)
-
-        # Expand parsed garment to shirt silhouette (DensePose hull substitute).
-        mask = hull_mask(mask * 255) // 255
-        mask[protect > 0] = 0
 
         close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
         mask = cv2.morphologyEx(mask * 255, cv2.MORPH_CLOSE, close_k)

@@ -262,6 +262,7 @@ def preserve_identity_regions(
     original: Image.Image,
     schp_atr: Image.Image | None = None,
     schp_lip: Image.Image | None = None,
+    garment_mask: Image.Image | None = None,
 ) -> Image.Image:
     """
     Paste face, hair, and hands from the original photo.
@@ -280,7 +281,10 @@ def preserve_identity_regions(
     if schp_atr is not None and schp_lip is not None:
         from worker.mask_refine import build_identity_protect_mask
 
-        schp_protect = build_identity_protect_mask(schp_atr, schp_lip)
+        gm = garment_mask
+        if gm is not None and gm.size != (w, h):
+            gm = gm.resize((w, h), Image.Resampling.LANCZOS)
+        schp_protect = build_identity_protect_mask(schp_atr, schp_lip, gm)
         if schp_protect.shape[:2] != (h, w):
             schp_protect = cv2.resize(schp_protect, (w, h), interpolation=cv2.INTER_LINEAR)
         protect = np.maximum(protect, schp_protect)
@@ -362,7 +366,7 @@ def finalize_on_original(
         )
 
     out = composite_garment_only(generated, original, feather)
-    return preserve_identity_regions(out, original, schp_atr_full, schp_lip_full)
+    return preserve_identity_regions(out, original, schp_atr_full, schp_lip_full, full_mask)
 
 
 def map_vton_to_original(
