@@ -24,12 +24,14 @@ Usage in a Kaggle Notebook:
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
 import time
 import urllib.request
 import subprocess
+import threading
 from pathlib import Path
 
 # Resolve paths
@@ -243,9 +245,11 @@ PIPELINE_PARSE_CONFIDENCE=0.45
 PIPELINE_PRE_UPSCALE=true
 PIPELINE_AUTO_WHITE_BALANCE=false
 PIPELINE_BLEND_MODE=garment_only
+PIPELINE_WHITE_BG_INFERENCE=true
+PIPELINE_PERSON_MATTING_FEATHER=5
 PIPELINE_NOISE_MATCH_STRENGTH=0.0
-PIPELINE_DEBLOCK=false
-PIPELINE_UPSCALE_FACTOR=1.0
+PIPELINE_DEBLOCK=true
+PIPELINE_UPSCALE_FACTOR=1.15
 
 # Optional heavy models (BiRefNet/GFPGAN add latency; off for Kaggle tunnel <120s)
 ENABLE_BIREFNET=false
@@ -329,11 +333,17 @@ def download_cloudflared() -> Path:
     return cf_path
 
 
+def _stream_output(proc: subprocess.Popen, prefix: str) -> None:
+    if proc.stdout is None:
+        return
+    for line in proc.stdout:
+        print(f"{prefix} {line.rstrip()}", flush=True)
+
+
 def run_services(cf_path: Path) -> None:
     """Start uvicorn backend and Cloudflare tunnel, then stream logs."""
     print("\n=== Step 8: Starting Services & Creating Tunnel ===")
-    
-    # Ensure folders exist
+
     (BACKEND_DIR / "data" / "uploads").mkdir(parents=True, exist_ok=True)
     (BACKEND_DIR / "data" / "outputs").mkdir(parents=True, exist_ok=True)
 
@@ -342,54 +352,51 @@ def run_services(cf_path: Path) -> None:
         [
             sys.executable, "-m", "uvicorn", "app.main:app",
             "--host", "0.0.0.0",
-            "--port", "8000"
+            "--port", "8000",
         ],
         cwd=str(BACKEND_DIR),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1
+        bufsize=1,
     )
-    
-    # Wait for backend to boot up
-    time.sleep(3)
-    
+    threading.Thread(target=_stream_output, args=(backend_proc, "[Backend]"), daemon=True).start()
+    time.sleep(4)
+
     print("Launching Cloudflare tunnel in background...")
     tunnel_proc = subprocess.Popen(
-        [
-            str(cf_path), "tunnel", "--url", "http://localhost:8000"
-        ],
+        [str(cf_path), "tunnel", "--url", "http://localhost:8000"],
         cwd=str(BACKEND_DIR),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1
+        bufsize=1,
     )
-    
-    # Search for the trycloudflare URL
+
     tunnel_url = None
     start_time = time.time()
-    
+    url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+
     print("Waiting for public tunnel URL to generate...")
-    while True:
-        if time.time() - start_time > 45:
-            print("WARNING: Timeout waiting for quick tunnel link.")
+    while time.time() - start_time < 60:
+        if tunnel_proc.stdout is None:
             break
-            
         line = tunnel_proc.stdout.readline()
         if not line:
-            break
-        
-        # Look for Cloudflare's generated url
-        match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+            if tunnel_proc.poll() is not None:
+                break
+            time.sleep(0.2)
+            continue
+        print(f"[Tunnel] {line.rstrip()}", flush=True)
+        match = url_pattern.search(line)
         if match:
             tunnel_url = match.group(0)
             break
-            
+
     if tunnel_url:
-        print("\n" + "="*85)
+        print("\n" + "=" * 85)
         print(" 🎉 SUCCESS! TRIALON API BACKEND IS NOW ONLINE!")
-        print("="*85)
+        print("=" * 85)
         print(f" 🔗 API URL:  {tunnel_url}")
         print(f" 🔗 Docs URL: {tunnel_url}/docs")
         print(f" 🔗 Health:   {tunnel_url}/health")
@@ -398,41 +405,64 @@ def run_services(cf_path: Path) -> None:
         print(" 2. In your local frontend folder, open or create '.env.local'.")
         print(f" 3. Paste: NEXT_PUBLIC_API_URL={tunnel_url}")
         print(" 4. Start your frontend: npm run dev")
-        print("="*85 + "\n")
+        print("=" * 85 + "\n")
     else:
         print("Could not retrieve Cloudflare tunnel URL automatically.")
-        print("Please check if the tunnel process exited or has errors.")
-        
+        print("Run: python deploy/kaggle/start_server.py")
+
     print("Streaming live backend logs (Press Stop in Kaggle to exit):\n")
     try:
-        while True:
-            # Check if backend crashed
-            if backend_proc.poll() is not None:
-                print("Backend process exited unexpectedly.")
-                break
-                
-            line = backend_proc.stdout.readline()
-            if line:
-                print(f"[Backend] {line.strip()}")
-            else:
-                time.sleep(0.1)
+        while backend_proc.poll() is None:
+            time.sleep(1)
     except KeyboardInterrupt:
         print("Stopping services...")
     finally:
         print("Terminating backend & tunnel...")
         backend_proc.terminate()
         tunnel_proc.terminate()
-        backend_proc.wait()
-        tunnel_proc.wait()
+        backend_proc.wait(timeout=5)
+        tunnel_proc.wait(timeout=5)
         print("Shutdown complete.")
 
 
+def models_ready() -> bool:
+    """True when CatVTON weights and .env exist (skip full reinstall)."""
+    safetensors = (
+        BACKEND_DIR
+        / "models"
+        / "catvton"
+        / "mix-48k-1024"
+        / "attention"
+        / "model.safetensors"
+    )
+    return safetensors.exists() and (BACKEND_DIR / ".env").exists()
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="TrialOn Kaggle backend runner")
+    parser.add_argument(
+        "--start-only",
+        action="store_true",
+        help="Skip pip install / model download — only start server + tunnel",
+    )
+    args = parser.parse_args()
+
+    if args.start_only:
+        print("\n=== Start-only mode: skipping install ===")
+        if not models_ready():
+            print("ERROR: Models or .env missing — run full setup once first.")
+            return
+        if not check_gpu():
+            print("Aborting because GPU/CUDA is required.")
+            return
+        cf_path = download_cloudflared()
+        run_services(cf_path)
+        return
+
     if not check_gpu():
-        # Ask to proceed anyway or abort
         print("Aborting because GPU/CUDA is required for efficient CatVTON processing.")
         return
-        
+
     if not check_internet():
         print("Aborting because internet access is required to download weights and models.")
         return

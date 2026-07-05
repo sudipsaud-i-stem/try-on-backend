@@ -116,16 +116,26 @@ class TryOnOrchestrator:
         if settings.ENABLE_PIPELINE_STAGE4:
             if settings.PIPELINE_BLEND_MODE == "garment_only":
                 from worker import postprocess
+                from worker.person_segment import recomposite_on_original_background
 
                 if ctx.vton_result and ctx.person and ctx.inpaint_mask:
                     swap_mask = ctx.inference_mask or ctx.inpaint_mask
                     target_size = (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT)
+                    inference_base = (
+                        ctx.person_white
+                        if settings.PIPELINE_WHITE_BG_INFERENCE and ctx.person_white
+                        else ctx.person
+                    )
                     blended_crop = postprocess.composite_garment_only(
                         ctx.vton_result,
-                        ctx.person,
+                        inference_base,
                         swap_mask,
                     )
                     base = ctx.blend_base or ctx.original_person
+                    use_white_recomposite = (
+                        settings.PIPELINE_WHITE_BG_INFERENCE
+                        and ctx.person_segment is not None
+                    )
 
                     if ctx.normalize_mode == "letterbox":
                         restored = postprocess.restore_from_letterbox(
@@ -133,6 +143,18 @@ class TryOnOrchestrator:
                             ctx.original_person.size,
                             target_size,
                         )
+                        if use_white_recomposite:
+                            alpha_full = postprocess.restore_mask_from_letterbox(
+                                ctx.person_segment,
+                                ctx.original_person.size,
+                                target_size,
+                            )
+                            restored = recomposite_on_original_background(
+                                ctx.original_person,
+                                restored,
+                                alpha_full,
+                            )
+                            ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
                             restored,
                             ctx.original_person,
@@ -149,7 +171,7 @@ class TryOnOrchestrator:
                         embed_mask = postprocess.build_embed_mask(
                             orig_crop,
                             ctx.inpaint_mask,
-                            ctx.alpha_matte,
+                            ctx.person_segment or ctx.alpha_matte,
                         )
                         embedded = postprocess.embed_crop_on_base(
                             base,
@@ -157,6 +179,18 @@ class TryOnOrchestrator:
                             ctx.crop_box,
                             embed_mask=embed_mask,
                         )
+                        if use_white_recomposite:
+                            alpha_full = postprocess.map_mask_to_full(
+                                ctx.person_segment,
+                                ctx.crop_box,
+                                ctx.original_person.size,
+                            )
+                            embedded = recomposite_on_original_background(
+                                ctx.original_person,
+                                embedded,
+                                alpha_full,
+                            )
+                            ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
                             embedded,
                             ctx.original_person,
@@ -169,8 +203,21 @@ class TryOnOrchestrator:
                         )
                         ctx.log("stage4: masked crop embed + original composite + identity lock")
                     else:
+                        restored = blended_crop
+                        if use_white_recomposite:
+                            alpha_full = ctx.person_segment.resize(
+                                ctx.original_person.size, Image.Resampling.LANCZOS
+                            )
+                            restored = recomposite_on_original_background(
+                                ctx.original_person,
+                                restored.resize(
+                                    ctx.original_person.size, Image.Resampling.LANCZOS
+                                ),
+                                alpha_full,
+                            )
+                            ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
-                            blended_crop,
+                            restored,
                             ctx.original_person,
                             swap_mask,
                             ctx.normalize_mode,
@@ -185,6 +232,33 @@ class TryOnOrchestrator:
                     ctx.blended = ctx.vton_result
             else:
                 stage4_blend.run_stage4_blend(ctx)
+                from worker import postprocess
+
+                if ctx.blended and ctx.original_person:
+                    schp_atr_full = schp_lip_full = None
+                    target_size = (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT)
+                    if ctx.schp_atr is not None and ctx.schp_lip is not None:
+                        schp_atr_full = postprocess.map_parse_to_original(
+                            ctx.schp_atr,
+                            ctx.normalize_mode,
+                            ctx.crop_box,
+                            ctx.original_person.size,
+                            target_size,
+                        )
+                        schp_lip_full = postprocess.map_parse_to_original(
+                            ctx.schp_lip,
+                            ctx.normalize_mode,
+                            ctx.crop_box,
+                            ctx.original_person.size,
+                            target_size,
+                        )
+                    ctx.blended = postprocess.preserve_identity_regions(
+                        ctx.blended,
+                        ctx.original_person,
+                        schp_atr_full,
+                        schp_lip_full,
+                    )
+                    ctx.log("stage4: Poisson blend + identity lock")
         else:
             from worker import postprocess
 
@@ -228,6 +302,8 @@ class TryOnOrchestrator:
 
         _save("00_original", ctx.original_person)
         _save("01_person_normalized", ctx.person)
+        _save("01b_person_white", ctx.person_white)
+        _save("01c_person_segment", ctx.person_segment)
         _save("02_inpaint_mask", ctx.inpaint_mask)
         _save("03_alpha_matte", ctx.alpha_matte)
         _save("04_vton", ctx.vton_result)

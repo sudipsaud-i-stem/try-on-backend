@@ -25,15 +25,20 @@ def run_stage3_vton(ctx: PipelineContext, infer_fn) -> Image.Image:
     inference_mask = tighten_mask(ctx.inpaint_mask)
     ctx.inference_mask = inference_mask
 
+    inference_person = ctx.person
+    if settings.PIPELINE_WHITE_BG_INFERENCE and ctx.person_white is not None:
+        inference_person = ctx.person_white
+        ctx.log("stage3: inferring on white-background person")
+
     inputs: PreprocessInputs = {
-        "person": ctx.person,
+        "person": inference_person,
         "garment": garment,
         "mask": inference_mask,
     }
     output = infer_fn(inputs)
 
-    # Lock original skin/body outside the shirt — CatVTON only changes the mask core.
-    output = composite_garment_only(output, ctx.person, inference_mask)
+    # Lock skin/body outside garment mask — CatVTON only changes the mask core.
+    output = composite_garment_only(output, inference_person, inference_mask)
 
     if settings.COLOR_PRESERVE_STRENGTH > 0:
         color_mask = tighten_mask(inference_mask, erode_px=settings.MASK_ERODE_PIXELS + 4)

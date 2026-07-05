@@ -33,15 +33,19 @@ def _upscale_final(image: Image.Image) -> Image.Image:
 
 
 def run_stage6_finalize(ctx: PipelineContext) -> Image.Image:
-    """Deblock JPEG artifacts and optional 2x upscale."""
+    """Deblock JPEG artifacts and optional light upscale (keeps original dimensions)."""
     source = ctx.final or ctx.blended or ctx.vton_result
     if source is None:
         raise RuntimeError("stage6 requires a generated image")
 
+    target_size = ctx.original_person.size
     rgb = _deblock(np.array(source.convert("RGB")))
     image = Image.fromarray(rgb)
     image = _upscale_final(image)
 
+    if image.size != target_size:
+        image = image.resize(target_size, Image.Resampling.LANCZOS)
+
     ctx.final = image
-    ctx.log(f"stage6: finalize (upscale={settings.PIPELINE_UPSCALE_FACTOR}x)")
+    ctx.log(f"stage6: deblock + upscale ({settings.PIPELINE_UPSCALE_FACTOR}x) → {target_size[0]}x{target_size[1]}")
     return image

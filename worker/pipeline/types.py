@@ -35,6 +35,8 @@ class PipelineContext:
     cloth_type: str
 
     person: Image.Image | None = None
+    person_white: Image.Image | None = None
+    person_segment: Image.Image | None = None
     inpaint_mask: Image.Image | None = None
     alpha_matte: Image.Image | None = None
     vton_result: Image.Image | None = None
