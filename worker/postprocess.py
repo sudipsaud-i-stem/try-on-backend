@@ -101,12 +101,11 @@ def composite_garment_only(
     )
     mask_arr = mask_arr / 255.0
 
-    # Hard swap inside mask core — soft edge only at boundary (avoids ghost shirt overlay).
-    alpha = np.clip((mask_arr - 0.10) / 0.22, 0.0, 1.0)
-    alpha = alpha ** 0.95
+    # Hard swap inside mask core — narrow soft edge only at boundary.
+    alpha = np.clip((mask_arr - 0.04) / 0.10, 0.0, 1.0)
 
     alpha_img = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
-    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.2))
+    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=0.6))
     alpha = np.array(alpha_img, dtype=np.float32) / 255.0
 
     alpha_3 = alpha[..., np.newaxis]
@@ -345,9 +344,9 @@ def finalize_on_original(
     full_mask_arr *= person_bounds
     full_mask = Image.fromarray((full_mask_arr * 255).astype(np.uint8), mode="L")
 
-    # Light edge feather only — stage3 already used a tightened inference mask.
+    # Minimal edge feather — avoid semi-transparent ghost overlays.
     feather = Image.fromarray(
-        cv2.GaussianBlur(np.array(full_mask.convert("L")), (5, 5), 0),
+        cv2.GaussianBlur(np.array(full_mask.convert("L")), (3, 3), 0),
         mode="L",
     )
     if generated.size != original.size:

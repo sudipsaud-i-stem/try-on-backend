@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     OUTPUT_WIDTH: int = 768
     OUTPUT_HEIGHT: int = 1024
     MASK_BLUR_FACTOR: int = 5
-    MASK_ERODE_PIXELS: int = 6
+    MASK_ERODE_PIXELS: int = 4
     MASK_PROTECT_IDENTITY: bool = True
     CLOTH_TYPE: str = "upper"
     INFERENCE_SEED: int = 42

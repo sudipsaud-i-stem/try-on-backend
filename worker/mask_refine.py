@@ -57,16 +57,16 @@ def build_identity_protect_mask(
     schp_atr: Image.Image,
     schp_lip: Image.Image,
 ) -> np.ndarray:
-    """Pixels pasted back from the original after try-on (face, hair, full arms)."""
+    """Paste back face, hair, and forearms/hands — not full arms (keeps new shirt sleeves)."""
     atr = np.array(schp_atr)
     lip = np.array(schp_lip)
-    protect = _face_hair_protect(atr, lip) | _full_arm_protect(atr, lip)
+    protect = _face_hair_protect(atr, lip) | _arm_distal_protect(atr, lip)
     return (protect > 0).astype(np.float32)
 
 
 def _inpaint_exclude_mask(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
-    """Remove face, hair, and full arms from inpaint — keeps torso/shirt body only."""
-    return _face_hair_protect(schp_atr, schp_lip) | _full_arm_protect(schp_atr, schp_lip)
+    """Exclude face, hair, and forearms/hands from inpaint — shirt sleeves may be repainted."""
+    return _face_hair_protect(schp_atr, schp_lip) | _arm_distal_protect(schp_atr, schp_lip)
 
 
 def ensure_minimum_garment_coverage(

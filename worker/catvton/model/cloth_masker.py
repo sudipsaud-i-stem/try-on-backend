@@ -349,6 +349,10 @@ class AutoMasker:
         if int((mask > 0).sum()) < 500:
             return Image.fromarray(mask * 255)
 
+        # Expand parsed garment to shirt silhouette (DensePose hull substitute).
+        mask = hull_mask(mask * 255) // 255
+        mask[protect > 0] = 0
+
         close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
         mask = cv2.morphologyEx(mask * 255, cv2.MORPH_CLOSE, close_k)
         mask = cv2.dilate(mask, dilate_kernel, iterations=1)

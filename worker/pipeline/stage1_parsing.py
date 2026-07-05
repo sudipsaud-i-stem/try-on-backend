@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 
 from app.config import settings
-from worker.catvton.image_utils import center_crop_box, resize_and_crop, resize_and_padding
+from worker.catvton.image_utils import resize_and_padding
 from worker.catvton.mask_service import generate_clothing_mask_full
 from worker.pipeline.types import ParseReport, PipelineContext
 
@@ -98,22 +98,6 @@ def _refine_sleeveless_mask(mask: Image.Image) -> Image.Image:
     return Image.fromarray(arr, mode="L")
 
 
-def _person_segment_fallback(person: Image.Image) -> np.ndarray:
-    """GrabCut-based coarse person mask as SCHP sanity check."""
-    from worker.postprocess import grabcut_person_mask
-
-    return grabcut_person_mask(person)
-
-
-def _blend_masks(primary: np.ndarray, fallback: np.ndarray) -> np.ndarray:
-    if fallback.max() == 0:
-        return primary
-    p = (primary > 127).astype(np.float32)
-    f = (fallback > 127).astype(np.float32)
-    blended = np.clip(0.65 * p + 0.35 * f, 0, 1)
-    return (blended * 255).astype(np.uint8)
-
-
 def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
     """SCHP mask with garment-type logic and low-confidence fallback."""
     if ctx.person is None:
@@ -128,18 +112,11 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
     src_w, src_h = blend_base.size
     target_w, target_h = target_size
 
-    # Wide/landscape photos: letterbox so arms/pose are not cut off by center crop.
-    if src_w / src_h > target_w / target_h * 1.05:
-        person = resize_and_padding(blend_base, target_size)
-        ctx.crop_box = None
-        ctx.normalize_mode = "letterbox"
-        ctx.log(f"stage1: letterbox ({src_w}x{src_h} -> {target_w}x{target_h})")
-    else:
-        crop_box = center_crop_box(blend_base.size, target_size)
-        person = resize_and_crop(blend_base, target_size)
-        ctx.crop_box = crop_box
-        ctx.normalize_mode = "center_crop"
-        ctx.log(f"stage1: center crop {crop_box}")
+    # Always letterbox — center crop cuts off raised arms and yoga poses.
+    person = resize_and_padding(blend_base, target_size)
+    ctx.crop_box = None
+    ctx.normalize_mode = "letterbox"
+    ctx.log(f"stage1: letterbox ({src_w}x{src_h} -> {target_w}x{target_h})")
 
     ctx.blend_base = blend_base
 
@@ -188,13 +165,22 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
 
     if confidence < settings.PIPELINE_PARSE_CONFIDENCE:
         used_fallback = True
-        ctx.log(f"stage1: low SCHP confidence ({confidence:.2f}) — blending GrabCut fallback")
-        fallback_arr = _person_segment_fallback(person)
+        ctx.log(f"stage1: low SCHP confidence ({confidence:.2f}) — expanding with torso heuristic")
+        fallback_arr = np.array(_fallback_torso_mask(person.size))
+        if ctx.schp_atr is not None and ctx.schp_lip is not None:
+            from worker.mask_refine import ensure_minimum_garment_coverage
+
+            fallback_arr = ensure_minimum_garment_coverage(
+                fallback_arr,
+                np.array(ctx.schp_atr),
+                np.array(ctx.schp_lip),
+                min_coverage=0.14,
+            )
+        merged = np.maximum(primary_arr, fallback_arr)
         if ctx.cloth_type.lower() in {"sleeveless", "tank", "tank_top"}:
-            fallback_arr = np.array(_refine_sleeveless_mask(Image.fromarray(fallback_arr, mode="L")))
-        blended = _blend_masks(primary_arr, fallback_arr)
-        mask = Image.fromarray(blended, mode="L").filter(ImageFilter.GaussianBlur(radius=2))
-        confidence = max(confidence, _mask_confidence(blended, ctx.cloth_type) * 0.9)
+            merged = np.array(_refine_sleeveless_mask(Image.fromarray(merged, mode="L")))
+        mask = Image.fromarray(merged, mode="L")
+        confidence = max(confidence, _mask_confidence(merged, ctx.cloth_type) * 0.85)
     else:
         mask = primary_mask
         ctx.log(f"stage1: SCHP conservative mask (confidence={confidence:.2f}, type={cloth_type}, identity-protected)")
