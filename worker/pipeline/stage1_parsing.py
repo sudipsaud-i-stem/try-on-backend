@@ -120,20 +120,36 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
 
     ctx.blend_base = blend_base
 
+    from worker.mask_refine import (
+        clip_mask_to_person,
+        fill_mask_holes,
+        keep_torso_component,
+        mask_is_boxy,
+        rebuild_garment_mask_from_schp,
+        refine_inpaint_mask,
+        ensure_minimum_garment_coverage,
+    )
+
     primary = generate_clothing_mask_full(person, cloth_type=cloth_type)
     ctx.schp_atr = primary["schp_atr"]
     ctx.schp_lip = primary["schp_lip"]
     primary_mask = primary["mask"]
-
-    from worker.mask_refine import refine_inpaint_mask
 
     primary_mask = refine_inpaint_mask(primary_mask, ctx.schp_atr, ctx.schp_lip, cloth_type)
     primary_arr = np.array(primary_mask.convert("L"))
     coverage = _mask_coverage(primary_arr)
 
     if coverage > 0.30:
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))
-        for _ in range(6):
+        primary_arr = clip_mask_to_person(
+            primary_arr,
+            person,
+            np.array(ctx.schp_atr),
+            np.array(ctx.schp_lip),
+        )
+        primary_arr = keep_torso_component(primary_arr, np.array(ctx.schp_atr), np.array(ctx.schp_lip))
+        coverage = _mask_coverage(primary_arr)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        for _ in range(3):
             if coverage <= 0.28:
                 break
             primary_arr = cv2.erode(primary_arr, kernel, iterations=1)
@@ -144,8 +160,6 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
     ctx.log(f"stage1: garment mask coverage={coverage:.2%} after refine")
 
     if coverage < 0.14:
-        from worker.mask_refine import ensure_minimum_garment_coverage
-
         expanded = ensure_minimum_garment_coverage(
             primary_arr,
             np.array(ctx.schp_atr),
@@ -165,22 +179,16 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
 
     if confidence < settings.PIPELINE_PARSE_CONFIDENCE:
         used_fallback = True
-        ctx.log(f"stage1: low SCHP confidence ({confidence:.2f}) — expanding with torso heuristic")
-        fallback_arr = np.array(_fallback_torso_mask(person.size))
-        if ctx.schp_atr is not None and ctx.schp_lip is not None:
-            from worker.mask_refine import ensure_minimum_garment_coverage
-
-            fallback_arr = ensure_minimum_garment_coverage(
-                fallback_arr,
-                np.array(ctx.schp_atr),
-                np.array(ctx.schp_lip),
-                min_coverage=0.14,
-            )
-        merged = np.maximum(primary_arr, fallback_arr)
+        ctx.log(f"stage1: low SCHP confidence ({confidence:.2f}) — rebuilding from SCHP upper labels")
+        mask_arr = rebuild_garment_mask_from_schp(
+            np.array(ctx.schp_atr),
+            np.array(ctx.schp_lip),
+            person,
+        )
         if ctx.cloth_type.lower() in {"sleeveless", "tank", "tank_top"}:
-            merged = np.array(_refine_sleeveless_mask(Image.fromarray(merged, mode="L")))
-        mask = Image.fromarray(merged, mode="L")
-        confidence = max(confidence, _mask_confidence(merged, ctx.cloth_type) * 0.85)
+            mask_arr = np.array(_refine_sleeveless_mask(Image.fromarray(mask_arr, mode="L")))
+        mask = Image.fromarray(mask_arr, mode="L")
+        confidence = max(confidence, _mask_confidence(mask_arr, ctx.cloth_type) * 0.85)
     else:
         mask = primary_mask
         ctx.log(f"stage1: SCHP conservative mask (confidence={confidence:.2f}, type={cloth_type}, identity-protected)")
@@ -191,9 +199,15 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
         cloth_type=cloth_type,
         mask_coverage=_mask_coverage(np.array(mask.convert("L"))),
     )
-    from worker.mask_refine import fill_mask_holes
-
-    mask_arr = fill_mask_holes(np.array(mask.convert("L")))
+    schp_atr_arr = np.array(ctx.schp_atr)
+    schp_lip_arr = np.array(ctx.schp_lip)
+    mask_arr = np.array(mask.convert("L"))
+    mask_arr = clip_mask_to_person(mask_arr, person, schp_atr_arr, schp_lip_arr)
+    mask_arr = keep_torso_component(mask_arr, schp_atr_arr, schp_lip_arr)
+    if mask_is_boxy(mask_arr):
+        ctx.log("stage1: boxy mask detected — rebuilding from SCHP upper labels + person clip")
+        mask_arr = rebuild_garment_mask_from_schp(schp_atr_arr, schp_lip_arr, person)
+    mask_arr = fill_mask_holes(mask_arr)
     ctx.person = person
     ctx.inpaint_mask = Image.fromarray(mask_arr, mode="L")
     return ctx.inpaint_mask

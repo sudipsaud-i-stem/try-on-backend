@@ -45,8 +45,8 @@ def _arm_distal_protect(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarra
     return protect
 
 
-def fill_mask_holes(mask: np.ndarray) -> np.ndarray:
-    """Fill enclosed holes (crossed-arm chest gaps) so CatVTON gets a continuous shirt region."""
+def fill_mask_holes(mask: np.ndarray, max_hole_ratio: float = 0.10) -> np.ndarray:
+    """Fill small enclosed holes only — avoid flooding letterbox/desk regions."""
     binary = (mask > 127).astype(np.uint8)
     if binary.max() == 0:
         return mask
@@ -56,8 +56,134 @@ def fill_mask_holes(mask: np.ndarray) -> np.ndarray:
     flood_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
     cv2.floodFill(flood, flood_mask, (0, 0), 1)
     holes = (flood == 0) & (binary == 0)
-    filled[holes] = 1
+    if not holes.any():
+        return mask
+    hole_limit = int(h * w * max_hole_ratio)
+    n, labels = cv2.connectedComponents(holes.astype(np.uint8))
+    for label in range(1, n):
+        component = labels == label
+        if int(component.sum()) <= hole_limit:
+            filled[component] = 1
     return (filled * 255).astype(np.uint8)
+
+
+def _schp_person_silhouette(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
+    """Union of SCHP body-part labels — excludes desk/laptop background noise."""
+    parts = [
+        "Face",
+        "Hair",
+        "Hat",
+        "Upper-clothes",
+        "Dress",
+        "Coat",
+        "Left-arm",
+        "Right-arm",
+        "Left-leg",
+        "Right-leg",
+        "Pants",
+        "Skirt",
+        "Jumpsuits",
+    ]
+    person = (
+        part_mask_of(parts, schp_lip, LIP_MAPPING)
+        | part_mask_of(parts, schp_atr, ATR_MAPPING)
+    ).astype(np.uint8)
+    if person.max() == 0:
+        return person
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))
+    person = cv2.morphologyEx(person * 255, cv2.MORPH_CLOSE, kernel)
+    return cv2.dilate(person, kernel, iterations=1)
+
+
+def clip_mask_to_person(
+    mask: np.ndarray,
+    person_image: Image.Image,
+    schp_atr: np.ndarray | None = None,
+    schp_lip: np.ndarray | None = None,
+) -> np.ndarray:
+    """Remove laptop/desk/background blobs outside the person silhouette."""
+    from worker.postprocess import grabcut_person_mask
+
+    if schp_atr is not None and schp_lip is not None:
+        person = _schp_person_silhouette(schp_atr, schp_lip)
+    else:
+        person = np.zeros(mask.shape, dtype=np.uint8)
+    if person.max() == 0:
+        person = grabcut_person_mask(person_image)
+    if person.max() == 0:
+        return mask
+    clipped = np.array(mask, dtype=np.uint8)
+    clipped[person <= 127] = 0
+    return clipped
+
+
+def keep_torso_component(
+    mask: np.ndarray,
+    schp_atr: np.ndarray,
+    schp_lip: np.ndarray,
+) -> np.ndarray:
+    """Keep the garment blob anchored on the face/torso, drop stray SCHP noise."""
+    binary = (mask > 127).astype(np.uint8)
+    if binary.max() == 0:
+        return mask
+    n, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    if n <= 2:
+        return mask
+
+    face = _face_hair_protect(schp_atr, schp_lip)
+    if face.any():
+        fy, fx = np.where(face > 0)
+        anchor = (float(fx.mean()), float(fy.mean()))
+    else:
+        anchor = (binary.shape[1] / 2.0, binary.shape[0] / 3.0)
+
+    best_label = 1
+    best_score = -1.0
+    for label in range(1, n):
+        area = stats[label, cv2.CC_STAT_AREA]
+        cx, cy = centroids[label]
+        dist = ((cx - anchor[0]) ** 2 + (cy - anchor[1]) ** 2) ** 0.5
+        score = area / (1.0 + dist * 0.35)
+        if score > best_score:
+            best_score = score
+            best_label = label
+
+    kept = (labels == best_label).astype(np.uint8) * 255
+    return kept
+
+
+def mask_is_boxy(mask: np.ndarray, coverage_threshold: float = 0.20) -> bool:
+    """Detect rectangular fallback / over-eroded masks that break try-on."""
+    binary = (mask > 127).astype(np.uint8)
+    coverage = float(binary.mean())
+    if coverage < coverage_threshold:
+        return False
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return False
+    contour = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(contour)
+    if area <= 0:
+        return False
+    rect = cv2.minAreaRect(contour)
+    box_area = max(rect[1][0] * rect[1][1], 1.0)
+    rectangularity = area / box_area
+    return rectangularity > 0.88 and coverage > 0.22
+
+
+def rebuild_garment_mask_from_schp(
+    schp_atr: np.ndarray,
+    schp_lip: np.ndarray,
+    person_image: Image.Image,
+) -> np.ndarray:
+    """Rebuild a person-shaped shirt mask when AutoMasker output is a box."""
+    upper = _schp_upper_garment(schp_atr, schp_lip).astype(np.uint8) * 255
+    upper[_inpaint_exclude_mask(schp_atr, schp_lip) > 0] = 0
+    upper = clip_mask_to_person(upper, person_image, schp_atr, schp_lip)
+    upper = keep_torso_component(upper, schp_atr, schp_lip)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    upper = cv2.morphologyEx(upper, cv2.MORPH_CLOSE, kernel)
+    return fill_mask_holes(upper)
 
 
 def _full_arm_protect(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
@@ -119,12 +245,7 @@ def ensure_minimum_garment_coverage(
     if float((upper > 127).mean()) >= min_coverage * 0.8:
         merged = np.maximum(mask, upper * 255)
     else:
-        h, w = mask.shape
-        fallback = np.zeros((h, w), dtype=np.uint8)
-        fallback[int(h * 0.18) : int(h * 0.78), int(w * 0.18) : int(w * 0.82)] = 255
-        exclude = _inpaint_exclude_mask(schp_atr, schp_lip)
-        fallback[exclude > 0] = 0
-        merged = np.maximum(mask, fallback)
+        merged = np.maximum(mask, upper * 255)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     merged = cv2.morphologyEx(merged, cv2.MORPH_CLOSE, kernel)
