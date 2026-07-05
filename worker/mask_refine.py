@@ -65,8 +65,8 @@ def build_identity_protect_mask(
 
 
 def _inpaint_exclude_mask(schp_atr: np.ndarray, schp_lip: np.ndarray) -> np.ndarray:
-    """Remove from inpaint: face, hair, hands — but keep shirt body and sleeves."""
-    return _face_hair_protect(schp_atr, schp_lip) | _arm_distal_protect(schp_atr, schp_lip)
+    """Remove face, hair, and full arms from inpaint — keeps torso/shirt body only."""
+    return _face_hair_protect(schp_atr, schp_lip) | _full_arm_protect(schp_atr, schp_lip)
 
 
 def ensure_minimum_garment_coverage(

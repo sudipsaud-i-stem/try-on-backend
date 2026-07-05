@@ -54,8 +54,12 @@ def _mask_confidence(mask: np.ndarray, cloth_type: str) -> float:
     x_span = (xs.max() - xs.min()) / max(w, 1)
 
     score = 0.55
-    if 0.12 <= coverage <= 0.42:
-        score += 0.2
+    if 0.08 <= coverage <= 0.22:
+        score += 0.25
+    elif 0.22 < coverage <= 0.30:
+        score += 0.1
+    elif coverage > 0.30:
+        score -= 0.35
     if 0.25 <= y_span <= 0.75:
         score += 0.15
     if 0.2 <= x_span <= 0.85:
@@ -193,7 +197,7 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
         confidence = max(confidence, _mask_confidence(blended, ctx.cloth_type) * 0.9)
     else:
         mask = primary_mask
-        ctx.log(f"stage1: SCHP mask ok (confidence={confidence:.2f}, type={cloth_type}, identity-protected)")
+        ctx.log(f"stage1: SCHP conservative mask (confidence={confidence:.2f}, type={cloth_type}, identity-protected)")
 
     ctx.parse = ParseReport(
         confidence=confidence,

@@ -339,6 +339,12 @@ def finalize_on_original(
     else:
         full_mask = swap_mask.resize(original.size, Image.Resampling.LANCZOS)
 
+    # Never composite outside the person silhouette (blocks background/watermark bleed).
+    person_bounds = np.array(grabcut_person_mask(original), dtype=np.float32) / 255.0
+    full_mask_arr = np.array(full_mask.convert("L"), dtype=np.float32) / 255.0
+    full_mask_arr *= person_bounds
+    full_mask = Image.fromarray((full_mask_arr * 255).astype(np.uint8), mode="L")
+
     # Light edge feather only — stage3 already used a tightened inference mask.
     feather = Image.fromarray(
         cv2.GaussianBlur(np.array(full_mask.convert("L")), (5, 5), 0),

@@ -299,6 +299,63 @@ class AutoMasker:
         mask_area = cv2.dilate(mask_area, dilate_kernel, iterations=1)
 
         return Image.fromarray(mask_area * 255)
+
+    @staticmethod
+    def schp_conservative_mask(
+        schp_lip_mask: Image.Image,
+        schp_atr_mask: Image.Image,
+        part: str = "upper",
+    ) -> Image.Image:
+        """
+        SCHP-only garment mask when DensePose is unavailable.
+
+        The official AutoMasker fills (almost) the whole frame when background
+        parsing fails — that causes purple full-frame overlays on yoga/desk photos.
+        This path limits the mask to parsed upper/lower garment labels only.
+        """
+        assert part in ["upper", "lower", "overall", "inner", "outer"]
+        schp_lip = np.array(schp_lip_mask)
+        schp_atr = np.array(schp_atr_mask)
+        h, w = schp_lip.shape[:2]
+
+        dilate_k = max(w, h) // 250
+        dilate_k = dilate_k if dilate_k % 2 == 1 else dilate_k + 1
+        dilate_kernel = np.ones((dilate_k, dilate_k), np.uint8)
+
+        blur_k = max(w, h) // 25
+        blur_k = blur_k if blur_k % 2 == 1 else blur_k + 1
+
+        garment = (
+            part_mask_of(MASK_CLOTH_PARTS[part], schp_lip, LIP_MAPPING)
+            | part_mask_of(MASK_CLOTH_PARTS[part], schp_atr, ATR_MAPPING)
+        ).astype(np.uint8)
+
+        protect = (
+            part_mask_of("Face", schp_lip, LIP_MAPPING)
+            | part_mask_of("Face", schp_atr, ATR_MAPPING)
+            | part_mask_of(["Hair"], schp_lip, LIP_MAPPING)
+            | part_mask_of(["Hair"], schp_atr, ATR_MAPPING)
+            | part_mask_of(["Left-arm", "Right-arm"], schp_lip, LIP_MAPPING)
+            | part_mask_of(["Left-arm", "Right-arm"], schp_atr, ATR_MAPPING)
+            | part_mask_of(PROTECT_BODY_PARTS[part], schp_lip, LIP_MAPPING)
+            | part_mask_of(PROTECT_BODY_PARTS[part], schp_atr, ATR_MAPPING)
+            | part_mask_of(PROTECT_CLOTH_PARTS[part]["LIP"], schp_lip, LIP_MAPPING)
+            | part_mask_of(PROTECT_CLOTH_PARTS[part]["ATR"], schp_atr, ATR_MAPPING)
+        )
+
+        mask = garment.copy()
+        mask[protect > 0] = 0
+
+        if int((mask > 0).sum()) < 500:
+            return Image.fromarray(mask * 255)
+
+        close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        mask = cv2.morphologyEx(mask * 255, cv2.MORPH_CLOSE, close_k)
+        mask = cv2.dilate(mask, dilate_kernel, iterations=1)
+        mask = cv2.GaussianBlur(mask, (blur_k, blur_k), 0)
+        mask = (mask >= 96).astype(np.uint8) * 255
+        mask[protect > 0] = 0
+        return Image.fromarray(mask)
         
     def __call__(
         self,
@@ -307,12 +364,19 @@ class AutoMasker:
     ):
         assert mask_type in ['upper', 'lower', 'overall', 'inner', 'outer'], f"mask_type should be one of ['upper', 'lower', 'overall', 'inner', 'outer'], but got {mask_type}"
         preprocess_results = self.preprocess_image(image)
-        mask = self.cloth_agnostic_mask(
-            preprocess_results['densepose'], 
-            preprocess_results['schp_lip'], 
-            preprocess_results['schp_atr'], 
-            part=mask_type,
-        )
+        if self.use_densepose:
+            mask = self.cloth_agnostic_mask(
+                preprocess_results['densepose'],
+                preprocess_results['schp_lip'],
+                preprocess_results['schp_atr'],
+                part=mask_type,
+            )
+        else:
+            mask = self.schp_conservative_mask(
+                preprocess_results['schp_lip'],
+                preprocess_results['schp_atr'],
+                part=mask_type,
+            )
         return {
             'mask': mask,
             'densepose': preprocess_results['densepose'],
