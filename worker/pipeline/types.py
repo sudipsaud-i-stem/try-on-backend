@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from loguru import logger
 from PIL import Image
 
 
@@ -56,6 +57,7 @@ class PipelineContext:
 
     def log(self, message: str) -> None:
         self.stage_logs.append(message)
+        logger.info("pipeline | {}", message)
 
     def summary(self) -> dict[str, Any]:
         return {

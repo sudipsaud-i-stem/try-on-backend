@@ -144,8 +144,6 @@ def run_inference_direct(
             garment_type=garment_type,
             debug_dir=debug_dir,
         )
-        for line in ctx.stage_logs:
-            logger.info("pipeline | {}", line)
         if ctx.parse:
             logger.info(
                 "pipeline summary | confidence={:.2f} fallback={} type={}",

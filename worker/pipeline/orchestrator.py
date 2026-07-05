@@ -30,6 +30,11 @@ class TryOnOrchestrator:
       4 Poisson blend, 5 GFPGAN, 6 deblock+upscale.
     """
 
+    @staticmethod
+    def _composite_base(ctx: PipelineContext) -> Image.Image:
+        """Full-resolution photo used for compositing (may be upscaled in stage0)."""
+        return ctx.blend_base or ctx.original_person
+
     def __init__(self, infer_fn) -> None:
         self._infer_fn = infer_fn
         self._models_warmed = False
@@ -121,6 +126,7 @@ class TryOnOrchestrator:
                 if ctx.vton_result and ctx.person and ctx.inpaint_mask:
                     swap_mask = ctx.inference_mask or ctx.inpaint_mask
                     target_size = (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT)
+                    composite_base = self._composite_base(ctx)
                     inference_base = (
                         ctx.person_white
                         if settings.PIPELINE_WHITE_BG_INFERENCE and ctx.person_white
@@ -131,7 +137,7 @@ class TryOnOrchestrator:
                         inference_base,
                         swap_mask,
                     )
-                    base = ctx.blend_base or ctx.original_person
+                    base = composite_base
                     use_white_recomposite = (
                         settings.PIPELINE_WHITE_BG_INFERENCE
                         and ctx.person_segment is not None
@@ -140,24 +146,24 @@ class TryOnOrchestrator:
                     if ctx.normalize_mode == "letterbox":
                         restored = postprocess.restore_from_letterbox(
                             blended_crop,
-                            ctx.original_person.size,
+                            composite_base.size,
                             target_size,
                         )
                         if use_white_recomposite:
                             alpha_full = postprocess.restore_mask_from_letterbox(
                                 ctx.person_segment,
-                                ctx.original_person.size,
+                                composite_base.size,
                                 target_size,
                             )
                             restored = recomposite_on_original_background(
-                                ctx.original_person,
+                                composite_base,
                                 restored,
                                 alpha_full,
                             )
                             ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
                             restored,
-                            ctx.original_person,
+                            composite_base,
                             swap_mask,
                             ctx.normalize_mode,
                             ctx.crop_box,
@@ -183,17 +189,17 @@ class TryOnOrchestrator:
                             alpha_full = postprocess.map_mask_to_full(
                                 ctx.person_segment,
                                 ctx.crop_box,
-                                ctx.original_person.size,
+                                composite_base.size,
                             )
                             embedded = recomposite_on_original_background(
-                                ctx.original_person,
+                                composite_base,
                                 embedded,
                                 alpha_full,
                             )
                             ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
                             embedded,
-                            ctx.original_person,
+                            composite_base,
                             swap_mask,
                             ctx.normalize_mode,
                             ctx.crop_box,
@@ -205,20 +211,24 @@ class TryOnOrchestrator:
                     else:
                         restored = blended_crop
                         if use_white_recomposite:
-                            alpha_full = ctx.person_segment.resize(
-                                ctx.original_person.size, Image.Resampling.LANCZOS
+                            alpha_full = postprocess.map_mask_to_full(
+                                ctx.person_segment,
+                                ctx.crop_box,
+                                composite_base.size,
+                            ) if ctx.crop_box else ctx.person_segment.resize(
+                                composite_base.size, Image.Resampling.LANCZOS
                             )
                             restored = recomposite_on_original_background(
-                                ctx.original_person,
+                                composite_base,
                                 restored.resize(
-                                    ctx.original_person.size, Image.Resampling.LANCZOS
+                                    composite_base.size, Image.Resampling.LANCZOS
                                 ),
                                 alpha_full,
                             )
                             ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
                             restored,
-                            ctx.original_person,
+                            composite_base,
                             swap_mask,
                             ctx.normalize_mode,
                             ctx.crop_box,
@@ -235,6 +245,7 @@ class TryOnOrchestrator:
                 from worker import postprocess
 
                 if ctx.blended and ctx.original_person:
+                    composite_base = self._composite_base(ctx)
                     schp_atr_full = schp_lip_full = None
                     target_size = (settings.OUTPUT_WIDTH, settings.OUTPUT_HEIGHT)
                     if ctx.schp_atr is not None and ctx.schp_lip is not None:
@@ -242,19 +253,19 @@ class TryOnOrchestrator:
                             ctx.schp_atr,
                             ctx.normalize_mode,
                             ctx.crop_box,
-                            ctx.original_person.size,
+                            composite_base.size,
                             target_size,
                         )
                         schp_lip_full = postprocess.map_parse_to_original(
                             ctx.schp_lip,
                             ctx.normalize_mode,
                             ctx.crop_box,
-                            ctx.original_person.size,
+                            composite_base.size,
                             target_size,
                         )
                     ctx.blended = postprocess.preserve_identity_regions(
                         ctx.blended,
-                        ctx.original_person,
+                        composite_base,
                         schp_atr_full,
                         schp_lip_full,
                     )
@@ -290,6 +301,14 @@ class TryOnOrchestrator:
         final = ctx.final or ctx.blended or ctx.vton_result
         if final is None:
             raise RuntimeError("Pipeline produced no output image")
+
+        if final.size != ctx.original_person.size:
+            final = final.resize(ctx.original_person.size, Image.Resampling.LANCZOS)
+            ctx.final = final
+            ctx.log(
+                f"output: resized to original {ctx.original_person.size[0]}x{ctx.original_person.size[1]}"
+            )
+
         return final, ctx
 
     def _save_debug(self, ctx: PipelineContext, debug_dir: Path) -> None:
