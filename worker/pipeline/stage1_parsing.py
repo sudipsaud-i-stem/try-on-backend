@@ -150,11 +150,14 @@ def run_stage1_parsing(ctx: PipelineContext) -> Image.Image:
     primary_arr = np.array(primary_mask.convert("L"))
     coverage = _mask_coverage(primary_arr)
 
-    if coverage > 0.35:
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-        primary_arr = cv2.erode(primary_arr, kernel, iterations=1)
+    if coverage > 0.30:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))
+        for _ in range(6):
+            if coverage <= 0.28:
+                break
+            primary_arr = cv2.erode(primary_arr, kernel, iterations=1)
+            coverage = _mask_coverage(primary_arr)
         primary_mask = Image.fromarray(primary_arr, mode="L")
-        coverage = _mask_coverage(primary_arr)
         ctx.log(f"stage1: trimmed oversized mask to {coverage:.2%} coverage")
 
     ctx.log(f"stage1: garment mask coverage={coverage:.2%} after refine")

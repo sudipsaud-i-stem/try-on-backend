@@ -121,7 +121,6 @@ class TryOnOrchestrator:
         if settings.ENABLE_PIPELINE_STAGE4:
             if settings.PIPELINE_BLEND_MODE == "garment_only":
                 from worker import postprocess
-                from worker.person_segment import recomposite_on_original_background
 
                 if ctx.vton_result and ctx.person and ctx.inpaint_mask:
                     swap_mask = ctx.inference_mask or ctx.inpaint_mask
@@ -138,10 +137,6 @@ class TryOnOrchestrator:
                         swap_mask,
                     )
                     base = composite_base
-                    use_white_recomposite = (
-                        settings.PIPELINE_WHITE_BG_INFERENCE
-                        and ctx.person_segment is not None
-                    )
 
                     if ctx.normalize_mode == "letterbox":
                         restored = postprocess.restore_from_letterbox(
@@ -149,18 +144,6 @@ class TryOnOrchestrator:
                             composite_base.size,
                             target_size,
                         )
-                        if use_white_recomposite:
-                            alpha_full = postprocess.restore_mask_from_letterbox(
-                                ctx.person_segment,
-                                composite_base.size,
-                                target_size,
-                            )
-                            restored = recomposite_on_original_background(
-                                composite_base,
-                                restored,
-                                alpha_full,
-                            )
-                            ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
                             restored,
                             composite_base,
@@ -171,32 +154,16 @@ class TryOnOrchestrator:
                             ctx.schp_atr,
                             ctx.schp_lip,
                         )
-                        ctx.log("stage4: letterbox restore + original composite + identity lock")
+                        ctx.log("stage4: letterbox restore + garment swap + identity lock")
                     elif ctx.crop_box is not None:
                         orig_crop = base.crop(ctx.crop_box)
-                        embed_mask = postprocess.build_embed_mask(
-                            orig_crop,
-                            ctx.inpaint_mask,
-                            ctx.person_segment or ctx.alpha_matte,
-                        )
+                        embed_mask = postprocess.build_embed_mask(orig_crop, ctx.inpaint_mask)
                         embedded = postprocess.embed_crop_on_base(
                             base,
                             blended_crop,
                             ctx.crop_box,
                             embed_mask=embed_mask,
                         )
-                        if use_white_recomposite:
-                            alpha_full = postprocess.map_mask_to_full(
-                                ctx.person_segment,
-                                ctx.crop_box,
-                                composite_base.size,
-                            )
-                            embedded = recomposite_on_original_background(
-                                composite_base,
-                                embedded,
-                                alpha_full,
-                            )
-                            ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
                             embedded,
                             composite_base,
@@ -207,27 +174,10 @@ class TryOnOrchestrator:
                             ctx.schp_atr,
                             ctx.schp_lip,
                         )
-                        ctx.log("stage4: masked crop embed + original composite + identity lock")
+                        ctx.log("stage4: garment embed + identity lock")
                     else:
-                        restored = blended_crop
-                        if use_white_recomposite:
-                            alpha_full = postprocess.map_mask_to_full(
-                                ctx.person_segment,
-                                ctx.crop_box,
-                                composite_base.size,
-                            ) if ctx.crop_box else ctx.person_segment.resize(
-                                composite_base.size, Image.Resampling.LANCZOS
-                            )
-                            restored = recomposite_on_original_background(
-                                composite_base,
-                                restored.resize(
-                                    composite_base.size, Image.Resampling.LANCZOS
-                                ),
-                                alpha_full,
-                            )
-                            ctx.log("stage4: white-bg VTON → original background restore")
                         blended = postprocess.finalize_on_original(
-                            restored,
+                            blended_crop.resize(composite_base.size, Image.Resampling.LANCZOS),
                             composite_base,
                             swap_mask,
                             ctx.normalize_mode,

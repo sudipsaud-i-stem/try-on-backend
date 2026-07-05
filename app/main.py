@@ -100,7 +100,7 @@ async def root() -> dict[str, str | int]:
         "service": "trialon-api",
         "version": "2.0.0",
         "docs": "/docs",
-        "tryon": "POST /tryon",
+        "tryon": "POST /tryon/async (recommended) or POST /tryon",
         "products": "GET /products",
         "cart": "GET /cart",
         "wishlist": "GET /wishlist",

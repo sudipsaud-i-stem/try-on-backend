@@ -24,19 +24,43 @@ def tighten_mask(mask: Image.Image, erode_px: int | None = None) -> Image.Image:
     return Image.fromarray(arr, mode="L")
 
 
-def grabcut_person_mask(image: Image.Image) -> np.ndarray:
+def grabcut_person_mask(image: Image.Image, max_side: int = 512) -> np.ndarray:
     """Coarse person silhouette for embedding / fallback matting."""
     rgb = np.array(image.convert("RGB"))
+    h, w = rgb.shape[:2]
+    scale = min(1.0, max_side / max(h, w))
+    if scale < 1.0:
+        small = cv2.resize(rgb, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        mask = _grabcut_mask_array(small)
+        return cv2.resize(mask, (w, h), interpolation=cv2.INTER_LINEAR)
+    return _grabcut_mask_array(rgb)
+
+
+def _grabcut_mask_array(rgb: np.ndarray) -> np.ndarray:
     h, w = rgb.shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
     rect = (int(w * 0.08), int(h * 0.03), int(w * 0.84), int(h * 0.94))
     bgd = np.zeros((1, 65), np.float64)
     fgd = np.zeros((1, 65), np.float64)
     try:
-        cv2.grabCut(rgb, mask, rect, bgd, fgd, 3, cv2.GC_INIT_WITH_RECT)
+        cv2.grabCut(rgb, mask, rect, bgd, fgd, 2, cv2.GC_INIT_WITH_RECT)
         return np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
     except cv2.error:
         return np.zeros((h, w), dtype=np.uint8)
+
+
+def build_garment_embed_mask(
+    original_crop: Image.Image,
+    inpaint_mask: Image.Image,
+) -> Image.Image:
+    """Soft garment-region mask for embedding VTON crop (avoids full-body ghost paste)."""
+    garment = np.array(
+        inpaint_mask.convert("L").resize(original_crop.size, Image.Resampling.LANCZOS)
+    )
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))
+    expanded = cv2.dilate(garment, kernel, iterations=2)
+    matte = Image.fromarray(expanded, mode="L")
+    return matte.filter(ImageFilter.GaussianBlur(radius=4))
 
 
 def build_embed_mask(
@@ -47,20 +71,15 @@ def build_embed_mask(
     """
     Person-shaped alpha for pasting VTON crop back onto the full photo.
 
-    Without this, embed_crop_on_base pastes a hard rectangle (the 'shirt box' bug).
+    Prefer garment-only embed mask to avoid ghost overlays on arms/props/background.
     """
+    if inpaint_mask is not None:
+        return build_garment_embed_mask(original_crop, inpaint_mask)
+
     if alpha_matte is not None:
         return alpha_matte.convert("L")
 
-    person = grabcut_person_mask(original_crop)
-
-    if inpaint_mask is not None:
-        garment = np.array(inpaint_mask.convert("L"))
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (35, 35))
-        torso = cv2.dilate(garment, kernel, iterations=2)
-        person = np.maximum(person, torso)
-
-    return Image.fromarray(person, mode="L")
+    return Image.fromarray(grabcut_person_mask(original_crop), mode="L")
 
 
 def composite_garment_only(
@@ -82,11 +101,11 @@ def composite_garment_only(
     )
     mask_arr = mask_arr / 255.0
 
-    alpha = np.clip((mask_arr - 0.38) / 0.38, 0.0, 1.0)
-    alpha = alpha ** 1.4
+    alpha = np.clip((mask_arr - 0.22) / 0.35, 0.0, 1.0)
+    alpha = alpha ** 1.15
 
     alpha_img = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
-    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=1.0))
+    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=0.8))
     alpha = np.array(alpha_img, dtype=np.float32) / 255.0
 
     alpha_3 = alpha[..., np.newaxis]
