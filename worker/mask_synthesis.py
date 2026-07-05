@@ -8,6 +8,7 @@ from worker.mask_refine import (
     _schp_upper_garment,
     bridge_disconnected_sleeves,
     clip_mask_to_person,
+    expand_mask_to_arms,
     fill_mask_holes,
     keep_torso_component,
     normalize_neckline,
@@ -55,7 +56,9 @@ def synthesize_garment_mask(
     else:
         neckline_key = neckline
 
-    candidate = normalize_neckline(candidate, schp_atr, schp_lip, neckline_key)
+    candidate = normalize_neckline(
+        candidate, schp_atr, schp_lip, neckline_key, body.keypoints
+    )
     candidate = trim_sleeves_to_length(
         candidate,
         body.keypoints,
@@ -63,11 +66,14 @@ def synthesize_garment_mask(
         schp_atr,
         schp_lip,
     )
-
-    if garment_profile.sleeve_length == "sleeveless":
-        h, w = candidate.shape[:2]
-        candidate[:, : int(w * 0.16)] = 0
-        candidate[:, int(w * 0.84) :] = 0
+    if garment_profile.sleeve_length != "sleeveless":
+        candidate = expand_mask_to_arms(
+            candidate,
+            body.keypoints,
+            schp_atr,
+            schp_lip,
+            garment_profile.sleeve_length,
+        )
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel)

@@ -37,6 +37,19 @@ def _collar_openness(upper: np.ndarray) -> float:
     return center_gap
 
 
+def _silhouette_width_ratio(arr: np.ndarray) -> float:
+    """Fraction of image width covered by garment at shoulder height (flat-lay)."""
+    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+    _, fg = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    if float(fg.mean()) > 200:
+        fg = cv2.bitwise_not(fg)
+    h, w = fg.shape[:2]
+    band = fg[int(h * 0.18) : int(h * 0.42), :]
+    if band.size == 0:
+        return 0.5
+    return float((band.mean(axis=0) > 127).sum()) / max(w, 1)
+
+
 def _sleeve_extent(arr: np.ndarray) -> tuple[float, float]:
     """Return left/right sleeve width ratios relative to image width."""
     h, w = arr.shape[:2]
@@ -79,6 +92,7 @@ def classify_garment(
     openness = _collar_openness(upper)
     left_sleeve, right_sleeve = _sleeve_extent(arr)
     sleeve_signal = max(left_sleeve, right_sleeve)
+    shoulder_width_ratio = _silhouette_width_ratio(arr)
 
     neckline = "crew"
     if category == "outerwear" or hint in {"hoodie", "coat", "jacket"}:
@@ -92,13 +106,20 @@ def classify_garment(
     elif hint in {"sleeveless", "tank", "tank_top"}:
         neckline = "none"
 
-    sleeve_length = "long"
-    if hint in {"sleeveless", "tank", "tank_top"} or sleeve_signal < 0.08:
+    # Never classify as sleeveless from weak edge signal alone — dark flat-lays
+    # (e.g. black sweatshirt on gray) have low Canny energy but clear wide silhouette.
+    if hint in {"sleeveless", "tank", "tank_top"}:
         sleeve_length = "sleeveless"
-    elif sleeve_signal < 0.18 or aspect < 0.72:
+    elif shoulder_width_ratio >= 0.58 or category in {"outerwear"} or hint in {"hoodie", "coat", "jacket"}:
+        sleeve_length = "long"
+    elif shoulder_width_ratio >= 0.46:
         sleeve_length = "short"
-    elif sleeve_signal < 0.28:
+    elif shoulder_width_ratio >= 0.38:
         sleeve_length = "three_quarter"
+    elif sleeve_signal >= 0.12:
+        sleeve_length = "long"
+    else:
+        sleeve_length = "long" if hint in {"upper", "shirt", "tshirt", "tee", "outer"} else "short"
 
     fit = "regular"
     torso_w_ratio = 0.55

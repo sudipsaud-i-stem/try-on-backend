@@ -102,10 +102,10 @@ def composite_garment_only(
     mask_arr = mask_arr / 255.0
 
     # Hard swap inside mask core — narrow soft edge only at boundary.
-    alpha = np.clip((mask_arr - 0.04) / 0.10, 0.0, 1.0)
+    alpha = np.clip((mask_arr - 0.02) / 0.06, 0.0, 1.0)
 
     alpha_img = Image.fromarray((alpha * 255).astype(np.uint8), mode="L")
-    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=0.6))
+    alpha_img = alpha_img.filter(ImageFilter.GaussianBlur(radius=0.4))
     alpha = np.array(alpha_img, dtype=np.float32) / 255.0
 
     alpha_3 = alpha[..., np.newaxis]

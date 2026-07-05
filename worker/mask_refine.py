@@ -215,6 +215,7 @@ def normalize_neckline(
     schp_atr: np.ndarray,
     schp_lip: np.ndarray,
     neckline_type: str = "auto",
+    keypoints: BodyKeypoints | None = None,
 ) -> np.ndarray:
     if neckline_type in {"auto", "none"}:
         return garment_mask
@@ -228,24 +229,41 @@ def normalize_neckline(
     if ys.size == 0:
         return garment_mask
 
+    h, w = garment_mask.shape[:2]
     fy, fx = np.where(face > 0)
     chin_y = int(fy.max())
     face_cx = float(fx.mean())
     face_width = max(float(fx.max() - fx.min()), 1.0)
+    torso_x0, torso_x1 = int(xs.min()), int(xs.max())
+    shoulder_width = max(torso_x1 - torso_x0, int(face_width * 2.0))
+
+    result = binary.copy() * 255
+    result[face > 0] = 0
+
+    if neckline_type in {"crew", "collar", "hoodie"}:
+        collar_y = chin_y + int(0.035 * h)
+        if keypoints and keypoints.left_shoulder and keypoints.right_shoulder:
+            collar_y = int(
+                (keypoints.left_shoulder[1] + keypoints.right_shoulder[1]) * 0.5 * h
+            )
+        neck_half = max(int(shoulder_width * 0.09), int(face_width * 0.32))
+        depth = max(int(shoulder_width * 0.05), 3)
+        cutout = np.zeros((h, w), dtype=np.uint8)
+        cv2.ellipse(
+            cutout,
+            (int(face_cx), int(collar_y)),
+            (neck_half, depth),
+            0, 0, 180, 255, -1,
+        )
+        result[cutout > 0] = 0
+        return result
 
     shoulder_y = int(np.percentile(ys, 8))
-    torso_x0, torso_x1 = int(xs.min()), int(xs.max())
-    shoulder_width = max(torso_x1 - torso_x0, int(face_width * 2.2))
-
-    neck_half_width = max(int(shoulder_width * 0.16), int(face_width * 0.55))
-    neck_top = min(chin_y, shoulder_y + int(shoulder_width * 0.02))
-
-    depth_ratio = {"crew": 0.10, "collar": 0.08, "scoop": 0.16, "vneck": 0.30, "hoodie": 0.12}.get(
-        neckline_type, 0.12
-    )
+    neck_half_width = max(int(shoulder_width * 0.14), int(face_width * 0.45))
+    neck_top = min(chin_y + int(0.04 * h), shoulder_y + int(shoulder_width * 0.04))
+    depth_ratio = {"scoop": 0.14, "vneck": 0.24}.get(neckline_type, 0.12)
     neck_depth = max(int(shoulder_width * depth_ratio), 4)
 
-    h, w = garment_mask.shape[:2]
     cutout = np.zeros((h, w), dtype=np.uint8)
     if neckline_type == "vneck":
         pts = np.array(
@@ -265,8 +283,53 @@ def normalize_neckline(
             0, 0, 180, 255, -1,
         )
 
-    result = binary.copy() * 255
     result[cutout > 0] = 0
+    result[face > 0] = 0
+    return result
+
+
+def expand_mask_to_arms(
+    garment_mask: np.ndarray,
+    keypoints: BodyKeypoints,
+    schp_atr: np.ndarray,
+    schp_lip: np.ndarray,
+    sleeve_length: str = "long",
+) -> np.ndarray:
+    """Add YOLO/SCHP arm corridors so raised/bent sleeves stay in the inpaint region."""
+    if sleeve_length == "sleeveless":
+        return garment_mask
+
+    h, w = garment_mask.shape[:2]
+    result = np.array(garment_mask, dtype=np.uint8)
+    radius = max(10, int(min(h, w) * 0.032))
+    corridor = np.zeros((h, w), dtype=np.uint8)
+
+    limbs = (
+        (keypoints.left_shoulder, keypoints.left_elbow, keypoints.left_wrist),
+        (keypoints.right_shoulder, keypoints.right_elbow, keypoints.right_wrist),
+    )
+    for shoulder, elbow, wrist in limbs:
+        if shoulder is None:
+            continue
+        end = wrist or elbow or shoulder
+        if sleeve_length == "short" and elbow is not None:
+            end = elbow
+        elif sleeve_length == "three_quarter" and elbow is not None and wrist is not None:
+            end = (
+                elbow[0] * 0.35 + wrist[0] * 0.65,
+                elbow[1] * 0.35 + wrist[1] * 0.65,
+            )
+        x0, y0 = int(shoulder[0] * w), int(shoulder[1] * h)
+        x1, y1 = int(end[0] * w), int(end[1] * h)
+        cv2.line(corridor, (x0, y0), (x1, y1), 255, thickness=max(radius * 2, 14))
+
+    result = np.maximum(result, corridor)
+    arm_schp = (_arm_union(schp_atr, schp_lip).astype(np.uint8) * 255)
+    result = np.maximum(result, cv2.bitwise_and(arm_schp, corridor))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, k)
+
+    face = _face_hair_protect(schp_atr, schp_lip)
     result[face > 0] = 0
     return result
 
@@ -279,12 +342,12 @@ def trim_sleeves_to_length(
     schp_lip: np.ndarray,
 ) -> np.ndarray:
     """Remove forearm regions from mask when target garment has shorter sleeves."""
-    if sleeve_length in {"sleeveless", "long"}:
+    if sleeve_length in {"long", "sleeveless"}:
         if sleeve_length == "sleeveless":
             h, w = garment_mask.shape[:2]
             result = np.array(garment_mask, dtype=np.uint8)
-            result[:, : int(w * 0.16)] = 0
-            result[:, int(w * 0.84) :] = 0
+            arm = _arm_union(schp_atr, schp_lip)
+            result[arm > 0] = 0
             face = _face_hair_protect(schp_atr, schp_lip)
             result[face > 0] = 0
             return result
@@ -329,9 +392,11 @@ def rebuild_garment_mask_from_schp(
     upper[_inpaint_exclude_mask(schp_atr, schp_lip) > 0] = 0
     upper = clip_mask_to_person(upper, person_image, schp_atr, schp_lip)
     upper = keep_torso_component(upper, schp_atr, schp_lip)
-    upper = normalize_neckline(upper, schp_atr, schp_lip, neckline_type)
+    upper = normalize_neckline(upper, schp_atr, schp_lip, neckline_type, keypoints)
     if keypoints is not None:
         upper = trim_sleeves_to_length(upper, keypoints, sleeve_length, schp_atr, schp_lip)
+        if sleeve_length != "sleeveless":
+            upper = expand_mask_to_arms(upper, keypoints, schp_atr, schp_lip, sleeve_length)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     upper = cv2.morphologyEx(upper, cv2.MORPH_CLOSE, kernel)
     return fill_mask_holes(upper)
@@ -428,7 +493,10 @@ def mask_shape_is_valid(
         chin_y = int(fy.max())
         top_y = int(np.where(binary > 0)[0].min())
         neckline_offset = top_y - chin_y
-        neckline_ok = top_y <= chin_y + int(0.15 * binary.shape[0])
+        # Collarbone should sit at or just below the chin — not above it (negative offset).
+        neckline_ok = (
+            chin_y - int(0.02 * binary.shape[0]) <= top_y <= chin_y + int(0.12 * binary.shape[0])
+        )
 
     symmetry_ok = True
     symmetry_ratio = 1.0
@@ -523,9 +591,11 @@ def refine_inpaint_mask(
         arr = bridge_disconnected_sleeves(arr, atr, lip)
 
     arr = ensure_minimum_garment_coverage(arr, atr, lip)
-    arr = normalize_neckline(arr, atr, lip, neckline_type)
+    arr = normalize_neckline(arr, atr, lip, neckline_type, keypoints)
     if keypoints is not None:
         arr = trim_sleeves_to_length(arr, keypoints, sleeve_length, atr, lip)
+        if sleeve_length != "sleeveless":
+            arr = expand_mask_to_arms(arr, keypoints, atr, lip, sleeve_length)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     arr = cv2.morphologyEx(arr, cv2.MORPH_CLOSE, kernel)
