@@ -13,10 +13,18 @@ def _matte_from_mask(mask: Image.Image) -> Image.Image:
     return matte.filter(ImageFilter.GaussianBlur(radius=settings.PIPELINE_MATTING_BLUR))
 
 
-def run_stage2_matting(ctx: PipelineContext) -> Image.Image:
-    """Person segmentation + optional white-background prep for CatVTON."""
+def run_stage2_matting(ctx: PipelineContext) -> Image.Image | None:
+    """
+    Optional person matting — only when white-bg CatVTON or BiRefNet is enabled.
+
+    Default in-place try-on skips this: we never cut the person out or paste on white.
+    """
     if ctx.person is None or ctx.inpaint_mask is None:
         raise RuntimeError("stage2 requires person + inpaint mask")
+
+    if not settings.PIPELINE_WHITE_BG_INFERENCE and not settings.ENABLE_BIREFNET:
+        ctx.log("stage2: skipped (in-place garment swap — person stays on original background)")
+        return None
 
     alpha: Image.Image | None = None
 

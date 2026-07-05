@@ -23,11 +23,15 @@ from worker.pipeline.types import PipelineContext
 
 class TryOnOrchestrator:
     """
-    7-stage HUBA streetwear pipeline for noisy real-world phone photos.
+    In-place virtual try-on on the original photo (no white-background extraction).
 
-    Stages:
-      0 quality triage, 1 SCHP+fallback parsing, 2 matting, 3 CatVTON,
-      4 Poisson blend, 5 GFPGAN, 6 deblock+upscale.
+    Flow:
+      0 — upscale blurry inputs if needed
+      1 — SCHP body parsing → exact upper-garment mask (face/arms excluded from mask)
+      2 — skipped by default (matting only for legacy white-bg mode)
+      3 — CatVTON inpaints only the garment region on the original-background person
+      4 — paste new garment onto full-resolution photo; lock face, hair, arms, pose
+      5–6 — optional face restore + light upscale
     """
 
     @staticmethod

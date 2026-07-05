@@ -28,7 +28,9 @@ def run_stage3_vton(ctx: PipelineContext, infer_fn) -> Image.Image:
     inference_person = ctx.person
     if settings.PIPELINE_WHITE_BG_INFERENCE and ctx.person_white is not None:
         inference_person = ctx.person_white
-        ctx.log("stage3: inferring on white-background person")
+        ctx.log("stage3: inferring on white-background person (legacy mode)")
+    else:
+        ctx.log("stage3: in-place inpaint on original photo (garment mask only)")
 
     inputs: PreprocessInputs = {
         "person": inference_person,
