@@ -1,0 +1,16 @@
+[
+  {
+    "name": "example-standing-crew",
+    "person": "tests/mask_matrix/persons/standing_front.jpg",
+    "garment": "tests/mask_matrix/garments/crew_long.jpg",
+    "cloth_type": "upper",
+    "expect": "pass"
+  },
+  {
+    "name": "example-crouch-reject",
+    "person": "tests/mask_matrix/persons/crouch.jpg",
+    "garment": "tests/mask_matrix/garments/vneck_short.jpg",
+    "cloth_type": "upper",
+    "expect": "reject"
+  }
+]

@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     PIPELINE_MIN_SHORT_EDGE: int = 512
     PIPELINE_BLUR_THRESHOLD: float = 80.0
     PIPELINE_PARSE_CONFIDENCE: float = 0.45
+    MASK_MIN_COVERAGE: float = 0.08
     PIPELINE_PRE_UPSCALE: bool = True
     PIPELINE_AUTO_WHITE_BALANCE: bool = True
     PIPELINE_MATTING_BLUR: int = 4

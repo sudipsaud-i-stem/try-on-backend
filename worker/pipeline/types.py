@@ -25,6 +25,13 @@ class ParseReport:
     used_fallback: bool
     cloth_type: str
     mask_coverage: float
+    mask_coverage_person_bbox: float | None = None
+    connectivity_component_count: int | None = None
+    neckline_offset_from_chin_keypoint: int | None = None
+    symmetry_ratio: float | None = None
+    used_fallback_source: str | None = None
+    garment_neckline_class: str | None = None
+    garment_sleeve_class: str | None = None
 
 
 @dataclass
@@ -54,15 +61,19 @@ class PipelineContext:
     normalize_mode: str = "center_crop"  # center_crop | letterbox
     schp_atr: Image.Image | None = None
     schp_lip: Image.Image | None = None
+    mask_diagnostics: dict | None = None
 
     def log(self, message: str) -> None:
         self.stage_logs.append(message)
         logger.info("pipeline | {}", message)
 
     def summary(self) -> dict[str, Any]:
-        return {
+        out = {
             "cloth_type": self.cloth_type,
             "quality": self.quality.__dict__ if self.quality else None,
             "parse": self.parse.__dict__ if self.parse else None,
             "stages": self.stage_logs,
         }
+        if self.mask_diagnostics:
+            out["mask_diagnostics"] = self.mask_diagnostics
+        return out
